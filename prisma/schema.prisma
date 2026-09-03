@@ -1,0 +1,580 @@
+// This schema matches your EXISTING database exactly — copied from your old
+// backend so Prisma maps to the tables you already have. No migration is run
+// against your database by this project; `prisma generate` only builds the
+// query client from this file.
+//
+// The only behavioral change in the new app: the `Like.type` column (free
+// text, already in your DB) is now written as "up" / "down" instead of the
+// old "heart" / "thumbsup" / "laugh" / etc. Existing rows with the old
+// reaction values are simply ignored by the new vote-counting code — nothing
+// is deleted or migrated.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                     Int              @id @default(autoincrement())
+  name                   String
+  email                  String           @unique
+  password               String?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  bio                    String?
+  deletedAt              DateTime?
+  username               String?          @unique
+  avatarUrl              String?
+  score                  Int              @default(0)
+  lastLoginAt            DateTime?
+  gender                 String?
+  orientation            String?
+  pronouns               String?
+  showGender             Boolean          @default(false)
+  showOrientation        Boolean          @default(false)
+  birthday               DateTime?
+  emailVerified          Boolean          @default(false)
+  verifyToken            String?          @unique
+  // New in 2.0 — the old site never had a password-reset flow, so these two
+  // columns don't exist yet on the production database. Unlike every other
+  // field in this schema, adding these requires a real migration before
+  // 2.0 can use password reset against the live Oracle VM database.
+  resetToken             String?          @unique
+  resetTokenExpiry       DateTime?
+  // New in 2.0 — set whenever a password reset completes, so authMiddleware
+  // can reject tokens issued before the reset (old logins get logged out).
+  // Same deal as resetToken above: needs a real migration before 2.0 can
+  // use it against the live Oracle VM database.
+  passwordChangedAt      DateTime?
+  // New in 2.0 — authenticator-app 2FA. twoFactorSecret is written as soon
+  // as setup starts (before it's confirmed) so the QR code can be
+  // re-verified; twoFactorEnabled only flips true once the user proves
+  // they scanned it by entering a valid code. twoFactorBackupCodes is a
+  // JSON array of bcrypt-hashed one-time recovery codes (never stored
+  // plain — each is shown once at generation time and removed from this
+  // array the moment it's used). Needs a real migration before 2.0 can
+  // use it against the live Oracle VM database.
+  twoFactorEnabled       Boolean          @default(false)
+  twoFactorSecret        String?
+  twoFactorBackupCodes   String?
+  coverUrl               String?
+  githubUrl              String?
+  instagramUrl           String?
+  linkedinUrl            String?
+  twitterUrl             String?
+  pinterestUrl           String?
+  currentCity            String?
+  education              String?
+  work                   String?
+  chatMessages           ChatMessage[]
+  comments               Comment[]
+  receivedMessages       DirectMessage[]  @relation("ReceivedMessages")
+  sentMessages           DirectMessage[]  @relation("SentMessages")
+  following              Follow[]         @relation("UserFollows")
+  followers              Follow[]         @relation("UserFollowers")
+  likes                  Like[]
+  notificationsActed     Notification[]   @relation("NotificationActor")
+  notificationsReceived  Notification[]   @relation("NotificationRecipient")
+  posts                  Post[]
+  blocking               Block[]          @relation("BlockingUsers")
+  blockedBy              Block[]          @relation("BlockedByUsers")
+  muting                 Mute[]           @relation("MutingUsers")
+  mutedBy                Mute[]           @relation("MutedByUsers")
+  googleId               String?          @unique
+  githubId               String?          @unique
+  reportsMade            Report[]         @relation("ReportsMade")
+  reportsReceived        Report[]         @relation("ReportsReceived")
+  supportTickets         SupportTicket[]
+  bookmarks              Bookmark[]
+  currentStreak          Int              @default(0)
+  lastStreakUpdate       DateTime?
+  arcadeScores           ArcadeScore[]
+  taggedInPosts          PostTaggedUser[]
+  uploadedMedia          Media[]
+  sessions               Session[]
+  pushSubscriptions      PushSubscription[]
+  authenticators         Authenticator[]
+  stories                Story[]
+  storyViews             StoryView[]
+}
+
+// New in 2.0 — passkeys (Settings > Account > Passkeys), an alternative to
+// password login using the device's own fingerprint/face/PIN unlock
+// (WebAuthn). credentialId identifies the passkey itself; publicKey +
+// counter are what verifyAuthenticationResponse() needs to check a login
+// attempt actually came from that passkey (counter also guards against a
+// cloned authenticator being replayed). Needs a real migration before 2.0
+// can use it against the live Oracle VM database.
+model Authenticator {
+  id           Int       @id @default(autoincrement())
+  userId       Int
+  credentialId String    @unique
+  publicKey    Bytes
+  counter      BigInt    @default(0)
+  transports   String?
+  deviceLabel  String?
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// New in 2.0 — short-lived WebAuthn challenges. The app is stateless-JWT
+// (no server sessions), so the random challenge generated for a
+// registration or login ceremony has to be parked somewhere between
+// "generate options" and "verify response" — this table is that parking
+// spot. Rows are deleted the moment they're used (or once expired); see
+// lib/webauthn.js. Needs a real migration before 2.0 can use it against
+// the live Oracle VM database.
+model WebAuthnChallenge {
+  id        String   @id
+  challenge String
+  expiresAt DateTime
+}
+
+// New in 2.0 — browser push notification subscriptions (Settings >
+// Appearance > Push notifications). One row per browser/device that has
+// push turned on; a user with push enabled on two devices has two rows.
+// Needs a real migration before 2.0 can use it against the live Oracle VM
+// database.
+model PushSubscription {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  endpoint   String   @unique
+  p256dh     String
+  auth       String
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Post {
+  id          Int              @id @default(autoincrement())
+  title       String
+  slug        String           @unique
+  content     String
+  published   Boolean          @default(false)
+  authorId    Int
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  imageUrl    String?
+  repostOfId  Int?
+  comments    Comment[]
+  likes       Like[]
+  author      User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  repostOf    Post?            @relation("Reposts", fields: [repostOfId], references: [id])
+  reposts     Post[]           @relation("Reposts")
+  categories  PostCategory[]
+  tags        PostTag[]
+  bookmarks   Bookmark[]
+  videoUrl    String?
+  taggedUsers PostTaggedUser[]
+  reports     Report[]
+  // New in 2.0 — an auto-generated branded preview card, used as the
+  // og:image meta tag only for posts that don't have their own imageUrl.
+  // Generated once at creation (and regenerated on edit, if still
+  // text-only) by lib/ogImage.js, stored via the same Media table as
+  // regular uploads. Needs a real migration before 2.0 can use it against
+  // the live Oracle VM database.
+  ogImageUrl  String?
+  // New in 2.0 — rich text formatting (bold/italic/strikethrough/code/
+  // links) from the post composer's toolbar. `content` stays the PLAIN
+  // TEXT of the post (what the editor's getText() returns) and keeps
+  // powering everything that already worked against it unchanged — full-
+  // text search, the OG image generator, the RSS feed, @mention
+  // resolution, notification snippets. `contentHtml` is the sanitized,
+  // already hashtag/mention-linked HTML used ONLY to render the post body
+  // richly; null for older posts (or a plain-text edit — see
+  // post.controller.js's updatePost), which just fall back to the
+  // existing plain-text + regex-linkified rendering. Needs a real
+  // migration before 2.0 can use it against the live Oracle VM database.
+  contentHtml String?
+  // New in 2.0 — multi-image carousel posts (up to 4 images per post).
+  // `imageUrl` above stays the FIRST image for backward compatibility
+  // with every existing single-image consumer (the OG-image generator's
+  // "already has an image" skip check, notification previews, RSS,
+  // older API clients) — this relation holds the full ordered set only
+  // when a post actually has more than one image. A single-image post
+  // (old, or created without ever touching the `images` field) has no
+  // rows here at all, and the frontend falls back to rendering imageUrl
+  // alone in that case. See post.controller.js's createPost/updatePost.
+  images      PostImage[]
+  // New in 2.0 — per-post analytics (see PostView below). Not included in
+  // formatPost's normal output — only post.controller.js's getPostAnalytics
+  // queries this, and only for the post's own author.
+  views       PostView[]
+}
+
+// New in 2.0 — one row per recorded view of a post, so analytics can chart
+// views over time, not just a lifetime total. Recorded by POST
+// /api/posts/:id/view, fired once per page load when a post is actually
+// opened/expanded (see FeedCard.jsx) — not on every feed scroll
+// impression. `viewerId` is null for a logged-out visitor; the author's
+// own views are never recorded at all (see post.controller.js). No
+// dedup beyond that: a returning viewer who reopens the post in a new
+// page load counts again, same as a plain page-view counter. Needs a
+// real migration before 2.0 can use it against the live Oracle VM
+// database.
+model PostView {
+  id        Int      @id @default(autoincrement())
+  postId    Int
+  viewerId  Int?
+  createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId, createdAt])
+}
+
+// New in 2.0 — see Post.images above. Needs a real migration before 2.0
+// can use it against the live Oracle VM database.
+model PostImage {
+  id       Int    @id @default(autoincrement())
+  postId   Int
+  url      String
+  position Int
+  post     Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+}
+
+model Comment {
+  id        Int       @id @default(autoincrement())
+  content   String
+  postId    Int
+  userId    Int
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  parentId  Int?
+  parent    Comment?  @relation("Replies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[] @relation("Replies")
+  post      Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reports   Report[]
+}
+
+model Category {
+  id    Int            @id @default(autoincrement())
+  name  String         @unique
+  posts PostCategory[]
+}
+
+model Tag {
+  id    Int       @id @default(autoincrement())
+  name  String    @unique
+  posts PostTag[]
+}
+
+model PostCategory {
+  postId     Int
+  categoryId Int
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  post       Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@id([postId, categoryId])
+}
+
+model PostTag {
+  postId Int
+  tagId  Int
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag    Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+}
+
+model Like {
+  userId Int
+  postId Int
+  type   String @default("heart")
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, postId])
+}
+
+model Bookmark {
+  userId Int
+  postId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@id([userId, postId])
+}
+
+model Follow {
+  followerId  Int
+  followingId Int
+  follower    User @relation("UserFollows", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@id([followerId, followingId])
+}
+
+model ChatMessage {
+  id        Int      @id @default(autoincrement())
+  content   String
+  userId    Int
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id          Int       @id @default(autoincrement())
+  type        String
+  read        Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  recipientId Int
+  actorId     Int
+  postId      Int?
+  readAt      DateTime?
+  // Free-text payload used by "system" notification types (report_reply,
+  // support_reply) to carry the admin's reply text directly, since those
+  // aren't about a post. actorId still points at whichever account sent
+  // it (the admin), but the frontend deliberately never shows that name
+  // for these types — it always displays "System" instead.
+  message     String?
+  actor       User      @relation("NotificationActor", fields: [actorId], references: [id], onDelete: Cascade)
+  recipient   User      @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+}
+
+model DirectMessage {
+  id         Int       @id @default(autoincrement())
+  content    String
+  read       Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+  senderId   Int
+  receiverId Int
+  readAt     DateTime?
+  // New in 2.0 — the receiver's-side view of a message, above, already
+  // existed; this is the sender's-side view (set when the sender reopens
+  // the thread after sending, confirming they've seen it too). Once both
+  // are set, the message is purged 24h later — see expireOldMessages() in
+  // message.controller.js. Needs a real migration before 2.0 can use it
+  // against the live Oracle VM database, same as everything else new here.
+  senderSeenAt DateTime?
+  receiver   User      @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+  sender     User      @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  reports    Report[]
+
+  @@index([senderId, receiverId])
+  @@index([receiverId, read])
+}
+
+model Block {
+  id        Int      @id @default(autoincrement())
+  blockerId Int
+  blockedId Int
+  createdAt DateTime @default(now())
+  blocker   User     @relation("BlockingUsers", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("BlockedByUsers", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+}
+
+// New in 2.0 — muting is deliberately lighter than blocking: it only hides
+// someone's posts from your own feed/trending, it doesn't sever follows,
+// doesn't stop them messaging you, and they're never told about it. Needs
+// a real migration before 2.0 can use it against the live Oracle VM
+// database, same as everything else new in this file.
+model Mute {
+  id        Int      @id @default(autoincrement())
+  muterId   Int
+  mutedId   Int
+  createdAt DateTime @default(now())
+  muter     User     @relation("MutingUsers", fields: [muterId], references: [id], onDelete: Cascade)
+  muted     User     @relation("MutedByUsers", fields: [mutedId], references: [id], onDelete: Cascade)
+
+  @@unique([muterId, mutedId])
+}
+
+// New in 2.0 — one row per issued login, so Settings > Account > Sessions
+// can show "where you're logged in" and let someone revoke a specific
+// device remotely. `jti` is a random id embedded in the JWT at issue time
+// (see issueSession() in auth.controller.js); every authenticated request
+// checks it against this table, so revoking a row here logs that device
+// out immediately rather than waiting for the JWT to expire on its own.
+// Tokens issued before this feature shipped have no jti and are treated
+// as always-valid here (nothing to check against) — they just age out
+// naturally via the JWT's own expiry. Needs a real migration before 2.0
+// can use it against the live Oracle VM database.
+model Session {
+  id           Int       @id @default(autoincrement())
+  userId       Int
+  jti          String    @unique
+  userAgent    String?
+  createdAt    DateTime  @default(now())
+  lastActiveAt DateTime  @default(now())
+  revokedAt    DateTime?
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Report {
+  id             Int       @id @default(autoincrement())
+  reporterId     Int
+  reportedUserId Int
+  reason         String
+  status         String    @default("open")
+  createdAt      DateTime  @default(now())
+  // Set by the admin panel when Sourabh replies to/resolves a report.
+  adminReply     String?
+  repliedAt      DateTime?
+  resolvedAt     DateTime?
+  // New in 2.0 — the old app could only report a USER. These four columns
+  // let a report point at the actual post/comment/message instead (or
+  // still just a user, the original behavior — that's why targetType
+  // defaults to "user" and the three id columns stay nullable). Like
+  // resetToken/resetTokenExpiry above, this needs a real migration before
+  // 2.0 can use it against the live Oracle VM database.
+  targetType     String    @default("user") // "user" | "post" | "comment" | "message"
+  postId         Int?
+  commentId      Int?
+  messageId      Int?
+  reporter       User            @relation("ReportsMade", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedUser   User            @relation("ReportsReceived", fields: [reportedUserId], references: [id], onDelete: Cascade)
+  post           Post?           @relation(fields: [postId], references: [id], onDelete: SetNull)
+  comment        Comment?        @relation(fields: [commentId], references: [id], onDelete: SetNull)
+  message        DirectMessage?  @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([reportedUserId])
+  @@index([status])
+}
+
+// New in 2.0 — built-in error logging (no third-party service). Written by
+// app.js's error-handling middleware; viewable in the admin Errors tab.
+// Needs a real migration before 2.0 can use it against the live Oracle VM
+// database, same as everything else new in this file.
+model ErrorLog {
+  id         Int      @id @default(autoincrement())
+  message    String
+  stack      String?
+  path       String?
+  method     String?
+  statusCode Int?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// New in 2.0 — built-in analytics (no third-party service). One row per
+// frontend route change; the admin Analytics tab aggregates these by day.
+// Needs a real migration before 2.0 can use it against the live Oracle VM
+// database, same as everything else new in this file.
+model PageView {
+  id        Int      @id @default(autoincrement())
+  path      String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model SupportTicket {
+  id         Int       @id @default(autoincrement())
+  userId     Int?
+  name       String?
+  email      String
+  subject    String
+  message    String
+  status     String    @default("open")
+  createdAt  DateTime  @default(now())
+  // Set by the admin panel when Sourabh replies to/resolves a ticket.
+  adminReply String?
+  repliedAt  DateTime?
+  resolvedAt DateTime?
+  user       User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+}
+
+model ArcadeScore {
+  id           Int       @id @default(autoincrement())
+  gameSlug     String
+  score        Int
+  userId       Int
+  updatedAt    DateTime  @updatedAt
+  lastPlayedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([gameSlug, userId])
+}
+
+model PostTaggedUser {
+  postId Int
+  userId Int
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+}
+
+// Uploaded images/videos, stored directly in this database (no third-party
+// storage). A post or profile's imageUrl/videoUrl/avatarUrl/coverUrl field
+// simply points at "/api/media/<id>" — nothing else about those existing
+// string fields changes. New table only; nothing above this is affected.
+// Needs a real migration before 2.0 can use it against the live Oracle VM
+// database — see oh-sheet-2.0-migration.sql.
+model Media {
+  id          Int      @id @default(autoincrement())
+  data        Bytes
+  mimeType    String
+  byteSize    Int
+  uploadedBy  Int
+  createdAt   DateTime @default(now())
+
+  uploader User @relation(fields: [uploadedBy], references: [id], onDelete: Cascade)
+}
+
+// New in 2.0 — Stories: an image, video, or text card that disappears 24h
+// after posting. Visible to the same audience as a normal post (this app
+// has no private-account concept, so that's simply "everyone, minus
+// mutes" — see story.controller.js's getStoriesFeed, which filters the
+// same way getAllPosts does in post.controller.js). Exactly one of
+// imageUrl/videoUrl/text is set per story; backgroundColor is only
+// meaningful for a text story (one of the app's five card colors — see
+// CARD_COLORS in FeedCard.jsx). `expiresAt` is the source of truth for
+// visibility (every query filters on it); story.controller.js also does
+// opportunistic best-effort deletion of expired rows, same pattern as
+// auth.controller.js's purgeExpiredDeletedAccounts, so the table doesn't
+// grow forever — but nothing depends on that cleanup actually running.
+// Needs a real migration before 2.0 can use it against the live Oracle VM
+// database.
+model Story {
+  id              Int         @id @default(autoincrement())
+  authorId        Int
+  imageUrl        String?
+  videoUrl        String?
+  text            String?
+  backgroundColor String?
+  createdAt       DateTime    @default(now())
+  expiresAt       DateTime
+  author          User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  views           StoryView[]
+
+  @@index([authorId, createdAt])
+  @@index([expiresAt])
+}
+
+// One row per (story, viewer) — lets the author see their view count and
+// lets the frontend show an unseen/seen ring around a story author's
+// avatar. The author's own views of their own story are never recorded
+// (see story.controller.js's viewStory).
+model StoryView {
+  id        Int      @id @default(autoincrement())
+  storyId   Int
+  viewerId  Int
+  createdAt DateTime @default(now())
+  story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  viewer    User     @relation(fields: [viewerId], references: [id], onDelete: Cascade)
+
+  @@unique([storyId, viewerId])
+  @@index([storyId])
+}
