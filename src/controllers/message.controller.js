@@ -99,6 +99,21 @@ async function getUnreadCount(req, res) {
   }
 }
 
+// POST /api/messages/read-all — marks every DM sent to me (across every
+// conversation) as read in one go, so opening the Messages list clears the
+// chat badge immediately instead of only when each thread is opened.
+async function markAllRead(req, res) {
+  try {
+    await prisma.directMessage.updateMany({
+      where: { receiverId: req.userId, read: false },
+      data: { read: true, readAt: new Date() },
+    });
+    return res.json({ ok: true });
+  } catch (error) {
+    return sendServerError(res, error, req);
+  }
+}
+
 // GET /api/messages/:username — the message thread with one other user.
 // Opening the thread also marks anything they sent you as read, AND marks
 // anything you sent them as seen-by-you-again — the sender's half of the
@@ -209,4 +224,4 @@ async function sendMessage(req, res) {
   }
 }
 
-module.exports = { getConversations, getUnreadCount, getThread, sendMessage };
+module.exports = { getConversations, getUnreadCount, markAllRead, getThread, sendMessage };
