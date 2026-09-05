@@ -18,13 +18,13 @@ async function sitemap(req, res) {
   try {
     const [posts, users] = await Promise.all([
       prisma.post.findMany({
-        where: { repostOfId: null },
+        where: { repostOfId: null, author: { isPrivate: false } },
         select: { id: true, createdAt: true },
         orderBy: { createdAt: "desc" },
         take: 2000,
       }),
       prisma.user.findMany({
-        where: { deletedAt: null, username: { not: null } },
+        where: { deletedAt: null, username: { not: null }, isPrivate: false },
         select: { username: true, updatedAt: true },
         take: 2000,
       }),

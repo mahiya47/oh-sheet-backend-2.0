@@ -28,7 +28,7 @@ async function feed(req, res) {
       where: {
         repostOfId: null,
         published: true,
-        author: { deletedAt: null },
+        author: { deletedAt: null, isPrivate: false },
       },
       orderBy: { createdAt: "desc" },
       take: FEED_SIZE,

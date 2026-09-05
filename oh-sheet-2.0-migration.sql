@@ -262,3 +262,27 @@ DO $$ BEGIN
       FOREIGN KEY ("uploadedBy") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- 19. Private accounts — Settings > Privacy & Safety > "Private account".
+--     A private account's new followers need to be approved instead of
+--     following instantly; FollowRequest holds one pending request until
+--     it's accepted (becomes a normal Follow row) or declined (deleted).
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "isPrivate" BOOLEAN NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS "FollowRequest" (
+  "id"          SERIAL PRIMARY KEY,
+  "requesterId" INTEGER NOT NULL,
+  "targetId"    INTEGER NOT NULL,
+  "createdAt"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "FollowRequest_requesterId_targetId_key" ON "FollowRequest"("requesterId", "targetId");
+CREATE INDEX IF NOT EXISTS "FollowRequest_targetId_idx" ON "FollowRequest"("targetId");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FollowRequest_requesterId_fkey') THEN
+    ALTER TABLE "FollowRequest" ADD CONSTRAINT "FollowRequest_requesterId_fkey"
+      FOREIGN KEY ("requesterId") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FollowRequest_targetId_fkey') THEN
+    ALTER TABLE "FollowRequest" ADD CONSTRAINT "FollowRequest_targetId_fkey"
+      FOREIGN KEY ("targetId") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+  END IF;
+END $$;

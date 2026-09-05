@@ -20,12 +20,22 @@ async function blockUser(req, res) {
       create: { blockerId, blockedId },
     });
 
-    // Blocking severs any existing follow relationship, both directions.
+    // Blocking severs any existing follow relationship, both directions —
+    // and any pending follow request between the two of you, so a blocked
+    // account can't sit in the other person's requests list forever.
     await prisma.follow.deleteMany({
       where: {
         OR: [
           { followerId: blockerId, followingId: blockedId },
           { followerId: blockedId, followingId: blockerId },
+        ],
+      },
+    });
+    await prisma.followRequest.deleteMany({
+      where: {
+        OR: [
+          { requesterId: blockerId, targetId: blockedId },
+          { requesterId: blockedId, targetId: blockerId },
         ],
       },
     });

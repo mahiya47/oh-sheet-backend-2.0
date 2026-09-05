@@ -558,6 +558,7 @@ async function getMe(req, res) {
         avatarUrl: true,
         coverUrl: true,
         emailVerified: true,
+        isPrivate: true,
         createdAt: true,
         birthday: true,
         pronouns: true,

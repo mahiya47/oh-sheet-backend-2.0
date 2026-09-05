@@ -8,10 +8,18 @@ const {
   getFollowInfo,
   getFollowers,
   getFollowing,
+  getFollowRequests,
+  acceptFollowRequest,
+  rejectFollowRequest,
 } = require("../controllers/follow.controller");
 
-router.get("/:userId/followers", getFollowers);
-router.get("/:userId/following", getFollowing);
+// Specific routes before the generic "/:userId" ones below.
+router.get("/requests", authMiddleware, getFollowRequests);
+router.post("/requests/:requesterId/accept", authMiddleware, acceptFollowRequest);
+router.delete("/requests/:requesterId", authMiddleware, rejectFollowRequest);
+
+router.get("/:userId/followers", optionalAuth, getFollowers);
+router.get("/:userId/following", optionalAuth, getFollowing);
 router.get("/:userId", optionalAuth, getFollowInfo);
 router.post("/:userId", authMiddleware, followUser);
 router.delete("/:userId", authMiddleware, unfollowUser);

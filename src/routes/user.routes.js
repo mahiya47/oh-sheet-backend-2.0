@@ -6,6 +6,7 @@ const {
   getUserByUsername,
   checkUsernameAvailable,
   updateProfile,
+  updatePrivacy,
   searchAll,
   getSuggestedUsers,
   getLeaderboard,
@@ -18,6 +19,7 @@ router.get("/leaderboard", getLeaderboard);
 router.get("/search", optionalAuth, searchAll);
 router.get("/check-username/:username", checkUsernameAvailable);
 router.put("/me", authMiddleware, updateProfile);
+router.put("/me/privacy", authMiddleware, updatePrivacy);
 router.get("/me/export", authMiddleware, exportMyData);
 
 router.get("/:username", optionalAuth, getUserByUsername);
