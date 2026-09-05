@@ -68,6 +68,13 @@ const FALLBACK_POST_COMMENTS = [
   "Incredible work here. Frame-worthy. If I could afford a frame right now.",
 ];
 
+const FALLBACK_DM_REPLIES = [
+  "Great message. Tremendous, really. People are saying it's one of the best DMs I've gotten all day.",
+  "Love that. Big fan of this conversation already, and it just started.",
+  "Huge point. Nobody texts like you, nobody. I mean that in a good way, mostly.",
+  "Couldn't agree more. Smart. Very smart. I'm smart too, so I'd know.",
+];
+
 function randomFrom(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
@@ -87,4 +94,14 @@ async function generateComment(postContent) {
   return reply || randomFrom(FALLBACK_POST_COMMENTS);
 }
 
-module.exports = { generateWelcomeMessage, generateComment };
+// A reply to a DM someone sent Tonald directly — same character, just
+// responding in a private chat instead of reacting to a public post.
+async function generateDmReply(userMessage) {
+  const trimmed = (userMessage || "").trim().slice(0, 500);
+  const reply = await callGroq(
+    `Someone just DMed you this on Oh Sheet!: "${trimmed || "(empty message)"}". Reply like you're texting back — short and in character.`,
+  );
+  return reply || randomFrom(FALLBACK_DM_REPLIES);
+}
+
+module.exports = { generateWelcomeMessage, generateComment, generateDmReply };

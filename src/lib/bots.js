@@ -75,4 +75,13 @@ function randomBotCommentDelayMs() {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-module.exports = { ensureBotUsers, getBotIds, randomBotCommentDelayMs, BOT_USERNAMES };
+// A DM reply should feel like someone's actually there — a few seconds,
+// not the multi-minute delay used for post comments. Overridable via env
+// the same way, for local testing.
+function randomBotReplyDelayMs() {
+  const min = Number(process.env.BOT_REPLY_DELAY_MS_MIN) || 2000;
+  const max = Number(process.env.BOT_REPLY_DELAY_MS_MAX) || 6000;
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+module.exports = { ensureBotUsers, getBotIds, randomBotCommentDelayMs, randomBotReplyDelayMs, BOT_USERNAMES };

@@ -1,7 +1,9 @@
 const prisma = require("../lib/prisma");
 const { publicUserSelect } = require("../utils/format");
 const { createNotification } = require("../utils/notify");
-const { getBotIds } = require("../lib/bots");
+const { getBotIds, randomBotReplyDelayMs } = require("../lib/bots");
+const { generateCatNoise } = require("../lib/pikku");
+const { generateDmReply } = require("../lib/groq");
 const { sendServerError } = require("../lib/errorLog");
 
 const MESSAGE_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours after BOTH sides have seen it
@@ -24,6 +26,30 @@ async function expireOldMessages() {
 function isBotId(id) {
   const bots = getBotIds();
   return !!bots && (id === bots.pikku || id === bots.tonald);
+}
+
+// Bot DM auto-reply — fire-and-forget, never awaited by sendMessage, and
+// wrapped in its own try/catch so a failure here never affects the send
+// response the human is waiting on. Pikku always meows back; Tonald
+// replies via Groq (or a canned fallback) using the message just sent
+// as context. A short delay so it feels like someone's actually there,
+// instead of an instant, obviously-automated reply.
+function scheduleBotReply(botId, humanId, userMessage) {
+  const bots = getBotIds();
+  if (!bots) return; // server started before bot accounts finished setting up
+
+  const getText = botId === bots.pikku ? () => Promise.resolve(generateCatNoise()) : () => generateDmReply(userMessage);
+
+  setTimeout(async () => {
+    try {
+      await prisma.directMessage.create({
+        data: { content: await getText(), senderId: botId, receiverId: humanId },
+      });
+      await createNotification({ recipientId: humanId, actorId: botId, type: "dm" });
+    } catch (error) {
+      console.error("Bot DM reply failed:", error.message);
+    }
+  }, randomBotReplyDelayMs());
 }
 
 // GET /api/messages/conversations — one row per person you've exchanged
@@ -212,6 +238,10 @@ async function sendMessage(req, res) {
     });
 
     await createNotification({ recipientId: other.id, actorId: me, type: "dm" });
+
+    if (isBotId(other.id)) {
+      scheduleBotReply(other.id, me, content);
+    }
 
     return res.status(201).json({
       id: message.id,
