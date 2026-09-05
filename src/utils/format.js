@@ -12,6 +12,7 @@ const publicUserSelect = {
   coverUrl: true,
   emailVerified: true,
   currentStreak: true,
+  isPrivate: true,
 };
 
 const postIncludeForFormat = {

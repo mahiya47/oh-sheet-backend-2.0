@@ -10,6 +10,7 @@ const { generateOgImageBuffer } = require("../lib/ogImage");
 const { sanitizeContentHtml } = require("../lib/richText");
 const { mediaUrl } = require("./media.controller");
 const { getBlockedUserIds } = require("../lib/blocks");
+const { getHiddenPrivateAuthorIds, isPrivateAndHidden } = require("../lib/privacy");
 const { sendServerError } = require("../lib/errorLog");
 
 // Text-only posts (no imageUrl/videoUrl) get a generated branded preview
@@ -271,11 +272,12 @@ async function getAllPosts(req, res) {
   try {
     const limit = Math.min(Number(req.query.limit) || 20, 50);
     const cursor = req.query.cursor ? Number(req.query.cursor) : null;
-    const [mutedIds, blockedIds] = await Promise.all([
+    const [mutedIds, blockedIds, privateIds] = await Promise.all([
       getMutedAuthorIds(req.userId),
       getBlockedUserIds(req.userId),
+      getHiddenPrivateAuthorIds(req.userId),
     ]);
-    const hiddenIds = new Set([...mutedIds, ...blockedIds]);
+    const hiddenIds = new Set([...mutedIds, ...blockedIds, ...privateIds]);
 
     const posts = await prisma.post.findMany({
       where: {
@@ -353,6 +355,10 @@ async function getPostsByUsername(req, res) {
     const author = await prisma.user.findUnique({ where: { username: req.params.username } });
     if (!author) return res.status(404).json({ message: "User not found" });
 
+    if (await isPrivateAndHidden(author, req.userId)) {
+      return res.status(403).json({ message: "This account is private", isPrivate: true });
+    }
+
     const posts = await prisma.post.findMany({
       where: { authorId: author.id, repostOfId: null },
       orderBy: { createdAt: "desc" },
@@ -373,6 +379,13 @@ async function getPostById(req, res) {
     const id = Number(req.params.id);
     const post = await prisma.post.findUnique({ where: { id }, include: postIncludeForFormat });
     if (!post || post.repostOfId) return res.status(404).json({ message: "Post not found" });
+
+    // A private account's post is treated as not existing to anyone who
+    // isn't the author or an accepted follower — same as visiting their
+    // profile directly.
+    if (await isPrivateAndHidden(post.author, req.userId)) {
+      return res.status(404).json({ message: "Post not found" });
+    }
 
     const { followedAuthorIds, bookmarkedPostIds, mutedAuthorIds } = await getViewerContext(req.userId, [post]);
     return res.json(formatPost(post, req.userId, followedAuthorIds, bookmarkedPostIds, mutedAuthorIds));
@@ -543,11 +556,12 @@ const TRENDING_WINDOW_DAYS = 30;
 async function getTrendingPosts(req, res) {
   try {
     const limit = Math.min(Number(req.query.limit) || 20, 50);
-    const [mutedIds, blockedIds] = await Promise.all([
+    const [mutedIds, blockedIds, privateIds] = await Promise.all([
       getMutedAuthorIds(req.userId),
       getBlockedUserIds(req.userId),
+      getHiddenPrivateAuthorIds(req.userId),
     ]);
-    const hiddenIds = new Set([...mutedIds, ...blockedIds]);
+    const hiddenIds = new Set([...mutedIds, ...blockedIds, ...privateIds]);
     const since = new Date(Date.now() - TRENDING_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 
     const posts = await prisma.post.findMany({
@@ -585,11 +599,12 @@ async function getPostsByTag(req, res) {
     const tag = await prisma.tag.findUnique({ where: { name } });
     if (!tag) return res.json([]);
 
-    const [mutedIds, blockedIds] = await Promise.all([
+    const [mutedIds, blockedIds, privateIds] = await Promise.all([
       getMutedAuthorIds(req.userId),
       getBlockedUserIds(req.userId),
+      getHiddenPrivateAuthorIds(req.userId),
     ]);
-    const hiddenIds = new Set([...mutedIds, ...blockedIds]);
+    const hiddenIds = new Set([...mutedIds, ...blockedIds, ...privateIds]);
 
     const postTags = await prisma.postTag.findMany({
       where: {

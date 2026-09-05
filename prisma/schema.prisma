@@ -100,6 +100,31 @@ model User {
   authenticators         Authenticator[]
   stories                Story[]
   storyViews             StoryView[]
+  // New in 2.0 — private accounts. When true, a new follower needs to be
+  // approved (see FollowRequest below) instead of following instantly, and
+  // this account's posts/follower list/following list are hidden from
+  // anyone who isn't an approved follower. Needs a real migration before
+  // 2.0 can use it against the live Oracle VM database, same as everything
+  // else new in this file.
+  isPrivate              Boolean          @default(false)
+  sentFollowRequests     FollowRequest[]  @relation("FollowRequestsSent")
+  receivedFollowRequests FollowRequest[]  @relation("FollowRequestsReceived")
+}
+
+// New in 2.0 — a pending "follow" on a private account, waiting for the
+// target to accept or decline (see follow.controller.js). Accepting turns
+// this into a normal Follow row and deletes this one; declining (or the
+// requester canceling) just deletes it. Needs a real migration before 2.0
+// can use it against the live Oracle VM database.
+model FollowRequest {
+  id          Int      @id @default(autoincrement())
+  requesterId Int
+  targetId    Int
+  createdAt   DateTime @default(now())
+  requester   User     @relation("FollowRequestsSent", fields: [requesterId], references: [id], onDelete: Cascade)
+  target      User     @relation("FollowRequestsReceived", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, targetId])
 }
 
 // New in 2.0 — passkeys (Settings > Account > Passkeys), an alternative to

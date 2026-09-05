@@ -37,13 +37,22 @@ async function getUserByUsername(req, res) {
     }
 
     let isFollowedByMe = false;
+    let hasPendingRequest = false;
     if (req.userId && req.userId !== user.id) {
-      const rel = await prisma.follow.findUnique({
-        where: {
-          followerId_followingId: { followerId: req.userId, followingId: user.id },
-        },
-      });
+      const [rel, pending] = await Promise.all([
+        prisma.follow.findUnique({
+          where: {
+            followerId_followingId: { followerId: req.userId, followingId: user.id },
+          },
+        }),
+        prisma.followRequest.findUnique({
+          where: {
+            requesterId_targetId: { requesterId: req.userId, targetId: user.id },
+          },
+        }),
+      ]);
       isFollowedByMe = !!rel;
+      hasPendingRequest = !!pending;
     }
 
     // Gender/orientation are only sent to other viewers when the user
@@ -63,6 +72,7 @@ async function getUserByUsername(req, res) {
       followingCount: user._count.following,
       _count: undefined,
       isFollowedByMe,
+      hasPendingRequest,
       isOwnProfile: isSelf,
     });
   } catch (error) {
@@ -218,6 +228,48 @@ async function updateProfile(req, res) {
   }
 }
 
+// PUT /api/users/me/privacy — Settings > Privacy & Safety > "Private
+// account". Kept separate from updateProfile above so flipping it is a
+// one-click, immediate save, not bundled in with the rest of the profile
+// form.
+async function updatePrivacy(req, res) {
+  try {
+    const { isPrivate } = req.body;
+    if (typeof isPrivate !== "boolean") {
+      return res.status(400).json({ message: "isPrivate must be true or false" });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: req.userId },
+      data: { isPrivate },
+      select: { isPrivate: true },
+    });
+
+    // Switching back to public: nobody should be left waiting on a
+    // request an account no longer needs — accept everyone who already
+    // asked, the same way Instagram does when you go public.
+    if (!isPrivate) {
+      const pending = await prisma.followRequest.findMany({ where: { targetId: req.userId } });
+      for (const request of pending) {
+        await prisma.follow.upsert({
+          where: {
+            followerId_followingId: { followerId: request.requesterId, followingId: req.userId },
+          },
+          update: {},
+          create: { followerId: request.requesterId, followingId: req.userId },
+        });
+      }
+      if (pending.length) {
+        await prisma.followRequest.deleteMany({ where: { targetId: req.userId } });
+      }
+    }
+
+    return res.json(updated);
+  } catch (error) {
+    return sendServerError(res, error, req);
+  }
+}
+
 // Turns free-typed search text into a Postgres tsquery string with prefix
 // matching on the last word — e.g. "sourabh cook" -> "sourabh & cook:*". The
 // trailing ":*" is what makes results show up while someone is still
@@ -249,6 +301,10 @@ async function searchAll(req, res) {
     const tsQuery = buildPrefixTsQuery(q);
     if (!tsQuery) return res.json({ users: [], tags: [], posts: [] });
 
+    // Users search still surfaces private accounts (so people can find and
+    // request to follow them) — but posts from a private account are left
+    // out of search results unless the searcher already follows them.
+    const viewerId = req.userId || 0;
     const [postMatches, userMatches, tags] = await Promise.all([
       prisma.$queryRaw`
         SELECT p.id, ts_rank(
@@ -259,6 +315,13 @@ async function searchAll(req, res) {
         JOIN "User" u ON u.id = p."authorId"
         WHERE p."repostOfId" IS NULL
           AND u."deletedAt" IS NULL
+          AND (
+            u."isPrivate" = false
+            OR u.id = ${viewerId}
+            OR EXISTS (
+              SELECT 1 FROM "Follow" f WHERE f."followerId" = ${viewerId} AND f."followingId" = u.id
+            )
+          )
           AND to_tsvector('english', p.title || ' ' || p.content) @@ to_tsquery('english', ${tsQuery})
         ORDER BY rank DESC
         LIMIT 20
@@ -553,6 +616,7 @@ module.exports = {
   getUserByUsername,
   checkUsernameAvailable,
   updateProfile,
+  updatePrivacy,
   searchAll,
   getSuggestedUsers,
   getLeaderboard,
