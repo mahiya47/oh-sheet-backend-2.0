@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const prisma = require("../lib/prisma");
+const { attachMonopoly, handleMonopolyDisconnect } = require("./monopoly");
 
 // ==========================================================
 // Real-time multiplayer arcade — Rock-Paper-Scissors, Tic-Tac-Toe,
@@ -83,6 +84,8 @@ function attachGameSockets(io) {
   const rooms = new Map();
   // userId -> Set<socketId> — who's currently connected, for challenge delivery.
   const onlineSockets = new Map();
+  // Monopoly is lobby-based rather than challenge-based: joinCode -> roomId.
+  const codes = new Map();
 
   function addOnline(userId, socketId) {
     if (!onlineSockets.has(userId)) onlineSockets.set(userId, new Set());
@@ -130,6 +133,10 @@ function attachGameSockets(io) {
 
   io.on("connection", (socket) => {
     addOnline(socket.userId, socket.id);
+
+    // Monopoly runs its own lobby + engine (realtime/monopoly.js) on top of
+    // this same authenticated socket and the shared `rooms` Map.
+    attachMonopoly(io, socket, { rooms, codes, roomChannel });
 
     // ------------------------------------------
     // DM TYPING INDICATOR — piggybacks on this same authenticated socket
@@ -472,6 +479,13 @@ function attachGameSockets(io) {
       for (const [roomId, room] of rooms.entries()) {
         const inRoom = room.players.some((p) => p.socketId === socket.id);
         if (!inRoom) continue;
+
+        // Monopoly games survive a dropped player (they keep their seat and
+        // can be skipped or reconnect) rather than ending the whole table.
+        if (room.gameSlug === "monopoly") {
+          handleMonopolyDisconnect(io, socket, { rooms, codes, roomChannel }, roomId, room);
+          continue;
+        }
 
         if (room.status === "pending") {
           // The challenger's tab closed before the invite was answered.
