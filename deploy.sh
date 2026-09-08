@@ -54,11 +54,31 @@ fi
 
 echo "==> Waiting for it to come back up..."
 sleep 3
-port="${PORT:-4000}"
-if curl -fsS -m 10 "http://127.0.0.1:${port}/" >/dev/null 2>&1; then
-  echo "==> API is responding on port ${port}. Done."
+
+# Which port the API listens on: PORT in the environment, else PORT in
+# .env, else the app's own default. Don't guess a single number — a
+# wrong guess looks like a failed deploy when the app is fine.
+env_port=""
+if [ -f .env ]; then
+  env_port="$(grep -E '^[[:space:]]*PORT=' .env | tail -1 | cut -d= -f2- \
+    | tr -d '"' | tr -d "'" | tr -d '\r' | xargs || true)"
+fi
+
+up=""
+for port in "${PORT:-}" "$env_port" 5000 4000 3000; do
+  [ -n "$port" ] || continue
+  if curl -fsS -m 10 "http://127.0.0.1:${port}/" >/dev/null 2>&1; then
+    up="$port"
+    break
+  fi
+done
+
+if [ -n "$up" ]; then
+  echo "==> API is responding on port ${up}. Done."
 else
-  echo "!! API did not answer on port ${port}. Check the logs:"
+  echo "!! Couldn't reach the API on any of the usual ports."
+  echo "   It may still be fine — check https://api.ohsheet.blog/ in a browser."
+  echo "   If that's down too, read the logs:"
   echo "     pm2 logs --lines 50        (if you use pm2)"
   echo "     journalctl -u <service> -n 50 --no-pager   (if you use systemd)"
   exit 1
