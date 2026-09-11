@@ -1,81 +1,75 @@
 // ==========================================================
-// Oh Sheet! Monopoly — board definition.
+// Oh Sheet! Monopoly — board definition. HOGWARTS EDITION.
 //
-// Classic 40-tile layout (4 corners + 9 tiles per side) — the familiar
-// Monopoly shape, just re-skinned: 22 buyable streets in 8 colour
-// groups, themed by category (retro games / anime / blockbuster movies
-// / video games) instead of city streets, plus 4 railroads, 2
-// utilities, corners, taxes and card tiles. Prices and rents follow the
-// original board's numbers exactly, since that curve is what keeps the
-// game balanced.
+// A smaller, faster board: 4 corners + 7 tiles per side = 32 tiles.
+// Every non-corner tile on a side is either a property (a Harry Potter
+// character), a Hogwarts House (this board's version of a utility — one
+// per side, 4 total), or a card tile (Chance on 2 sides, Community
+// Chest on the other 2). No railroads, no tax tiles — kept lean on
+// purpose. Corners: START, AZKABAN (jail / just visiting), PLATFORM
+// 93/4 (a safe rest stop, opposite START), and the AUCTION HOUSE.
 //
 // This file is the single source of truth for the RULES side of the
-// board. The frontend has its own display-only copy (names, colours,
-// prices) — every rent calculation and legality check happens here, on
-// the server.
+// board. The frontend has its own display-only copy (geometry only —
+// names, colours, prices all come from here). Every rent calculation
+// and legality check happens on the server.
 // ==========================================================
 
-// type: "go" | "street" | "rail" | "utility" | "chance" | "chest"
-//     | "tax" | "jail" | "parking" | "gotojail"
+// type: "go" | "street" | "utility" | "chance" | "chest" | "jail"
+//     | "platform" | "auction"
 //
-// For streets: rent[0] is the bare-lot rent, rent[1..4] are 1-4 houses,
-// rent[5] is a hotel. build = cost per house/hotel on that group.
+// For streets: rent[0] is the bare-lot rent, rent[1..4] are upgrade
+// levels 1-4, rent[5] is the max (5th) upgrade level. build = cost per
+// upgrade on that group. "Houses" is still the internal field name for
+// upgrade level (0-5) — the UI shows it as a rent upgrade, not a house.
 const BOARD = [
-  { i: 0, type: "go", name: "GO" },
+  { i: 0, type: "go", name: "START" },
 
-  { i: 1, type: "street", name: "Pac-Man", group: "brown", price: 60, rent: [2, 10, 30, 90, 160, 250], build: 50 },
-  { i: 2, type: "chest", name: "Community Chest" },
-  { i: 3, type: "street", name: "Tetris", group: "brown", price: 60, rent: [4, 20, 60, 180, 320, 450], build: 50 },
-  { i: 4, type: "tax", name: "Income Tax", amount: 200 },
-  { i: 5, type: "rail", name: "Millennium Falcon", price: 200 },
-  { i: 6, type: "street", name: "Star Wars", group: "lightblue", price: 100, rent: [6, 30, 90, 270, 400, 550], build: 50 },
-  { i: 7, type: "chance", name: "Chance" },
-  { i: 8, type: "street", name: "Jurassic Park", group: "lightblue", price: 100, rent: [6, 30, 90, 270, 400, 550], build: 50 },
-  { i: 9, type: "street", name: "Harry Potter", group: "lightblue", price: 120, rent: [8, 40, 100, 300, 450, 600], build: 50 },
-  { i: 10, type: "jail", name: "Jail / Just Visiting" },
+  { i: 1, type: "street", name: "Filch", group: "brown", price: 60, rent: [2, 10, 30, 90, 160, 250], build: 50 },
+  { i: 2, type: "chance", name: "Chance" },
+  { i: 3, type: "street", name: "Dobby", group: "brown", price: 60, rent: [4, 20, 60, 180, 320, 450], build: 50 },
+  { i: 4, type: "street", name: "Neville Longbottom", group: "lightblue", price: 100, rent: [6, 30, 90, 270, 400, 550], build: 50 },
+  { i: 5, type: "utility", name: "Gryffindor Tower", price: 150 },
+  { i: 6, type: "street", name: "Luna Lovegood", group: "lightblue", price: 100, rent: [6, 30, 90, 270, 400, 550], build: 50 },
+  { i: 7, type: "street", name: "Cho Chang", group: "lightblue", price: 120, rent: [8, 40, 100, 300, 450, 600], build: 50 },
 
-  { i: 11, type: "street", name: "Naruto", group: "pink", price: 140, rent: [10, 50, 150, 450, 625, 750], build: 100 },
-  { i: 12, type: "utility", name: "Power Grid", price: 150 },
-  { i: 13, type: "street", name: "One Piece", group: "pink", price: 140, rent: [10, 50, 150, 450, 625, 750], build: 100 },
-  { i: 14, type: "street", name: "Attack on Titan", group: "pink", price: 160, rent: [12, 60, 180, 500, 700, 900], build: 100 },
-  { i: 15, type: "rail", name: "Hogwarts Express", price: 200 },
-  { i: 16, type: "street", name: "Minecraft", group: "orange", price: 180, rent: [14, 70, 200, 550, 750, 950], build: 100 },
-  { i: 17, type: "chest", name: "Community Chest" },
-  { i: 18, type: "street", name: "Grand Theft Auto V", group: "orange", price: 180, rent: [14, 70, 200, 550, 750, 950], build: 100 },
-  { i: 19, type: "street", name: "Fortnite", group: "orange", price: 200, rent: [16, 80, 220, 600, 800, 1000], build: 100 },
+  { i: 8, type: "jail", name: "Azkaban" },
 
-  { i: 20, type: "parking", name: "Free Parking" },
+  { i: 9, type: "street", name: "Fred Weasley", group: "pink", price: 140, rent: [10, 50, 150, 450, 625, 750], build: 100 },
+  { i: 10, type: "chest", name: "Community Chest" },
+  { i: 11, type: "street", name: "George Weasley", group: "pink", price: 160, rent: [12, 60, 180, 500, 700, 900], build: 100 },
+  { i: 12, type: "street", name: "Cedric Diggory", group: "orange", price: 180, rent: [14, 70, 200, 550, 750, 950], build: 100 },
+  { i: 13, type: "utility", name: "Hufflepuff Basement", price: 150 },
+  { i: 14, type: "street", name: "Nymphadora Tonks", group: "orange", price: 180, rent: [14, 70, 200, 550, 750, 950], build: 100 },
+  { i: 15, type: "street", name: "Hagrid", group: "orange", price: 200, rent: [16, 80, 220, 600, 800, 1000], build: 100 },
 
-  { i: 21, type: "street", name: "The Matrix", group: "red", price: 220, rent: [18, 90, 250, 700, 875, 1050], build: 150 },
-  { i: 22, type: "chance", name: "Chance" },
-  { i: 23, type: "street", name: "Inception", group: "red", price: 220, rent: [18, 90, 250, 700, 875, 1050], build: 150 },
-  { i: 24, type: "street", name: "The Dark Knight", group: "red", price: 240, rent: [20, 100, 300, 750, 925, 1100], build: 150 },
-  { i: 25, type: "rail", name: "Batmobile Garage", price: 200 },
-  { i: 26, type: "street", name: "Dragon Ball", group: "yellow", price: 260, rent: [22, 110, 330, 800, 975, 1150], build: 150 },
-  { i: 27, type: "street", name: "Demon Slayer", group: "yellow", price: 260, rent: [22, 110, 330, 800, 975, 1150], build: 150 },
-  { i: 28, type: "utility", name: "Water Works", price: 150 },
-  { i: 29, type: "street", name: "My Hero Academia", group: "yellow", price: 280, rent: [24, 120, 360, 850, 1025, 1200], build: 150 },
+  { i: 16, type: "platform", name: "Platform 9¾" },
 
-  { i: 30, type: "gotojail", name: "Go To Jail" },
+  { i: 17, type: "street", name: "Sirius Black", group: "red", price: 220, rent: [18, 90, 250, 700, 875, 1050], build: 150 },
+  { i: 18, type: "chance", name: "Chance" },
+  { i: 19, type: "street", name: "Severus Snape", group: "red", price: 240, rent: [20, 100, 300, 750, 925, 1100], build: 150 },
+  { i: 20, type: "street", name: "Minerva McGonagall", group: "yellow", price: 260, rent: [22, 110, 330, 800, 975, 1150], build: 150 },
+  { i: 21, type: "utility", name: "Ravenclaw Tower", price: 150 },
+  { i: 22, type: "street", name: "Remus Lupin", group: "yellow", price: 260, rent: [22, 110, 330, 800, 975, 1150], build: 150 },
+  { i: 23, type: "street", name: "Albus Dumbledore", group: "yellow", price: 280, rent: [24, 120, 360, 850, 1025, 1200], build: 150 },
 
-  { i: 31, type: "street", name: "The Legend of Zelda", group: "green", price: 300, rent: [26, 130, 390, 900, 1100, 1275], build: 200 },
-  { i: 32, type: "street", name: "God of War", group: "green", price: 300, rent: [26, 130, 390, 900, 1100, 1275], build: 200 },
-  { i: 33, type: "chest", name: "Community Chest" },
-  { i: 34, type: "street", name: "Elden Ring", group: "green", price: 320, rent: [28, 150, 450, 1000, 1200, 1400], build: 200 },
-  { i: 35, type: "rail", name: "Nautilus", price: 200 },
-  { i: 36, type: "chance", name: "Chance" },
-  { i: 37, type: "street", name: "Avatar", group: "navy", price: 350, rent: [35, 175, 500, 1100, 1300, 1500], build: 200 },
-  { i: 38, type: "tax", name: "Luxury Tax", amount: 100 },
-  { i: 39, type: "street", name: "Avengers: Endgame", group: "navy", price: 400, rent: [50, 200, 600, 1400, 1700, 2000], build: 200 },
+  { i: 24, type: "auction", name: "Diagon Alley Auction" },
+
+  { i: 25, type: "street", name: "Bellatrix Lestrange", group: "green", price: 300, rent: [26, 130, 390, 900, 1100, 1275], build: 200 },
+  { i: 26, type: "chest", name: "Community Chest" },
+  { i: 27, type: "street", name: "Lord Voldemort", group: "green", price: 320, rent: [28, 150, 450, 1000, 1200, 1400], build: 200 },
+  { i: 28, type: "street", name: "Ron Weasley", group: "navy", price: 350, rent: [35, 175, 500, 1100, 1300, 1500], build: 200 },
+  { i: 29, type: "utility", name: "Slytherin Dungeon", price: 150 },
+  { i: 30, type: "street", name: "Hermione Granger", group: "navy", price: 380, rent: [38, 190, 550, 1200, 1400, 1600], build: 200 },
+  { i: 31, type: "street", name: "Harry Potter", group: "navy", price: 400, rent: [50, 200, 600, 1400, 1700, 2000], build: 200 },
 ];
 
-const BOARD_SIZE = BOARD.length; // 40
+const BOARD_SIZE = BOARD.length; // 32
 const GO_SALARY = 200;
 const START_CASH = 1500;
-const JAIL_INDEX = 10;
+const JAIL_INDEX = 8;
 const JAIL_FINE = 50;
-const MAX_HOUSES = 5; // 5 === hotel
-const RAIL_RENT = [25, 50, 100, 200];
+const MAX_HOUSES = 5; // 5 === max upgrade level
 
 // Every tile index belonging to each colour group — precomputed once, used
 // for monopoly checks and even-build rules.
@@ -87,53 +81,50 @@ for (const tile of BOARD) {
   }
 }
 
-const RAIL_TILES = BOARD.filter((t) => t.type === "rail").map((t) => t.i);
+// No railroads on this board — kept as an empty array (rather than
+// removed) so anything that still imports RAIL_TILES/RAIL_RENT degrades
+// to "no railroads exist" instead of crashing.
+const RAIL_TILES = [];
+const RAIL_RENT = [25, 50, 100, 200];
 const UTILITY_TILES = BOARD.filter((t) => t.type === "utility").map((t) => t.i);
 const BUYABLE = new Set(
-  BOARD.filter((t) => t.type === "street" || t.type === "rail" || t.type === "utility").map((t) => t.i)
+  BOARD.filter((t) => t.type === "street" || t.type === "utility").map((t) => t.i)
 );
 
 // --- Card decks -------------------------------------------------------
 // kind: "money" (delta), "moveTo" (index, collect GO if passed),
-//       "moveBy" (delta), "jail", "getout", "nearestRail", "nearestUtility",
+//       "moveBy" (delta), "jail", "getout", "nearestUtility",
 //       "eachPlayer" (delta: + = collect from each, - = pay each),
-//       "repairs" (perHouse/perHotel)
+//       "repairs" (perHouse/perHotel — per upgrade level / max level)
 const CHANCE_CARDS = [
-  { text: "Your post went viral — advance to GO and collect $200.", kind: "moveTo", index: 0 },
-  { text: "Sponsored deal! Collect $150.", kind: "money", delta: 150 },
-  { text: "Server bill due. Pay $100.", kind: "money", delta: -100 },
-  { text: "Take a ride to the nearest railroad and pay double rent.", kind: "nearestRail" },
-  { text: "Power surge — advance to the nearest utility.", kind: "nearestUtility" },
-  { text: "Caught spamming the feed. Go directly to Jail.", kind: "jail" },
-  { text: "Get Out of Jail Free — keep this card.", kind: "getout" },
-  { text: "Advance to Avengers: Endgame.", kind: "moveTo", index: 39 },
+  { text: "You found a Portkey — advance to START and collect $200.", kind: "moveTo", index: 0 },
+  { text: "Gringotts pays interest on your vault — collect $150.", kind: "money", delta: 150 },
+  { text: "Your broomstick needs repairs. Pay $100.", kind: "money", delta: -100 },
+  { text: "Advance to Harry Potter.", kind: "moveTo", index: 31 },
+  { text: "A Dementor is near — go directly to Azkaban.", kind: "jail" },
+  { text: "Get Out of Azkaban Free — keep this card.", kind: "getout" },
+  { text: "A house-elf apparates you to the nearest Hogwarts House.", kind: "nearestUtility" },
   { text: "Go back 3 spaces.", kind: "moveBy", delta: -3 },
-  { text: "Crowdfunding success — collect $50 from every player.", kind: "eachPlayer", delta: 50 },
-  { text: "You broke production. Pay $25 per house and $100 per hotel.", kind: "repairs", perHouse: 25, perHotel: 100 },
-  { text: "Advance to Minecraft.", kind: "moveTo", index: 16 },
-  { text: "Domain renewal. Pay $75.", kind: "money", delta: -75 },
-  { text: "Ad revenue payout — collect $200.", kind: "money", delta: 200 },
-  { text: "Advance to The Legend of Zelda.", kind: "moveTo", index: 31 },
-  { text: "Refactor gone wrong. Pay $120.", kind: "money", delta: -120 },
+  { text: "The whole school chips in — collect $50 from every player.", kind: "eachPlayer", delta: 50 },
+  { text: "A repair charm is needed on your properties. Pay $25 per upgrade level, $100 if maxed out.", kind: "repairs", perHouse: 25, perHotel: 100 },
+  { text: "Advance to Ron Weasley.", kind: "moveTo", index: 28 },
+  { text: "Owl post delivery fee. Pay $75.", kind: "money", delta: -75 },
+  { text: "You won the House Cup — collect $200.", kind: "money", delta: 200 },
 ];
 
 const CHEST_CARDS = [
-  { text: "Bank error in your favour — collect $200.", kind: "money", delta: 200 },
-  { text: "Doctor's fee. Pay $50.", kind: "money", delta: -50 },
-  { text: "Get Out of Jail Free — keep this card.", kind: "getout" },
-  { text: "Go directly to Jail.", kind: "jail" },
-  { text: "Followers milestone — collect $100.", kind: "money", delta: 100 },
-  { text: "Income tax refund — collect $20.", kind: "money", delta: 20 },
+  { text: "Gringotts error in your favour — collect $200.", kind: "money", delta: 200 },
+  { text: "Hospital wing fee. Pay $50.", kind: "money", delta: -50 },
+  { text: "Get Out of Azkaban Free — keep this card.", kind: "getout" },
+  { text: "Caught out of bed after hours — go directly to Azkaban.", kind: "jail" },
+  { text: "You brewed a perfect potion — collect $100.", kind: "money", delta: 100 },
+  { text: "Ministry tax refund — collect $20.", kind: "money", delta: 20 },
   { text: "It's your birthday — collect $20 from every player.", kind: "eachPlayer", delta: 20 },
-  { text: "Advance to GO and collect $200.", kind: "moveTo", index: 0 },
-  { text: "Hosting upgrade. Pay $100.", kind: "money", delta: -100 },
-  { text: "Sold some old gear — collect $75.", kind: "money", delta: 75 },
-  { text: "Street repairs. Pay $40 per house and $115 per hotel.", kind: "repairs", perHouse: 40, perHotel: 115 },
-  { text: "Won second prize in a meme contest — collect $10.", kind: "money", delta: 10 },
-  { text: "Consultancy fee — collect $130.", kind: "money", delta: 130 },
-  { text: "Data breach settlement. Pay $150.", kind: "money", delta: -150 },
-  { text: "Inheritance — collect $100.", kind: "money", delta: 100 },
-  { text: "Cloud credits expired. Pay $60.", kind: "money", delta: -60 },
+  { text: "Advance to START and collect $200.", kind: "moveTo", index: 0 },
+  { text: "You inherited an old vault — collect $100.", kind: "money", delta: 100 },
+  { text: "A repair charm is needed on your properties. Pay $40 per upgrade level, $115 if maxed out.", kind: "repairs", perHouse: 40, perHotel: 115 },
+  { text: "You sold some old spellbooks — collect $75.", kind: "money", delta: 75 },
+  { text: "Cauldron replacement fee. Pay $60.", kind: "money", delta: -60 },
 ];
 
 module.exports = {

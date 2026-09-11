@@ -32,16 +32,17 @@ const {
 // granular diff events.
 // ==========================================================
 
-const MAX_PLAYERS = 8;
-const MIN_PLAYERS = 2;
+// Fixed at 4 players — one seat per corner of the board/screen, matching
+// the HUD layout (top-left, top-right, bottom-left, bottom-right).
+const MAX_PLAYERS = 4;
+const MIN_PLAYERS = 4;
 const LOG_LIMIT = 40;
-// A disconnected player isn't dropped straight away — an 8-player game
-// shouldn't die because someone's phone slept. They keep their seat and
-// their turn is auto-passed until they come back or the room empties.
-const TOKEN_COLORS = [
-  "#e5484d", "#3e9dd8", "#f5c945", "#4caf82",
-  "#c46be0", "#f08a3c", "#2fbfa8", "#e06b9c",
-];
+// A disconnected player isn't dropped straight away — a game shouldn't
+// die because someone's phone slept. They keep their seat and their turn
+// is auto-passed until they come back or the room empties.
+// Seat order matches the 4 HUD corners: top-left, top-right, bottom-left,
+// bottom-right.
+const TOKEN_COLORS = ["#3e9dd8", "#e5484d", "#4caf82", "#f5c945"];
 
 function shuffled(n) {
   const arr = Array.from({ length: n }, (_, i) => i);
@@ -619,7 +620,11 @@ function attachMonopoly(io, socket, ctx) {
     game.players[seat].cash -= tile.build;
     const st = tileState(game, index);
     st.houses += 1;
-    say(game, `Seat ${seat + 1} built ${st.houses === MAX_HOUSES ? "a hotel" : "a house"} on ${tile.name}.`);
+    const newRent = tile.rent[st.houses];
+    say(
+      game,
+      `Seat ${seat + 1} upgraded ${tile.name} to level ${st.houses}${st.houses === MAX_HOUSES ? " (max)" : ""} — rent is now $${newRent}.`
+    );
     pushState(roomId);
   });
 
@@ -632,7 +637,7 @@ function attachMonopoly(io, socket, ctx) {
     const st = tileState(game, index);
     st.houses -= 1;
     game.players[seat].cash += Math.floor(tile.build / 2);
-    say(game, `Seat ${seat + 1} sold a building on ${tile.name}.`);
+    say(game, `Seat ${seat + 1} downgraded ${tile.name} to level ${st.houses} — rent is now $${tile.rent[st.houses]}.`);
     pushState(roomId);
   });
 
