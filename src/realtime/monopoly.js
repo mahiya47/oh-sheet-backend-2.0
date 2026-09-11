@@ -82,6 +82,7 @@ function initGame(playerCount) {
     doubles: 0,
     pending: null, // { type: "buy", index } | { type: "debt", amount, creditor }
     card: null, // last drawn card, for the card popup
+    jailVote: null, // { seat, eligible: [seats], votes: { seat: "free"|"keep" } }
     log: [],
     winner: null,
     started: Date.now(),
@@ -173,6 +174,34 @@ function goToJail(game, seat) {
   p.jailTurns = 0;
   game.doubles = 0;
   say(game, `Seat ${seat + 1} was sent to Jail.`);
+  startJailVote(game, seat);
+}
+
+// Everyone else at the table gets a say: free the jailed player right
+// away, or leave them to serve their time as normal. Starts fresh each
+// time someone lands in Jail, replacing any vote already in progress.
+function startJailVote(game, seat) {
+  const eligible = activeSeats(game).filter((s) => s !== seat);
+  game.jailVote = eligible.length ? { seat, eligible, votes: {} } : null;
+}
+
+// Majority of votes cast wins; a tie (or nobody voting at all) leaves the
+// player in Jail as normal. Called once every eligible voter has voted,
+// and as a safety net right before the jailed player's own turn comes up
+// again, so a slow voter can never stall the table.
+function resolveJailVote(game) {
+  const jv = game.jailVote;
+  if (!jv) return;
+  const choices = Object.values(jv.votes);
+  const freeCount = choices.filter((c) => c === "free").length;
+  const keepCount = choices.filter((c) => c === "keep").length;
+  if (freeCount > keepCount) {
+    game.players[jv.seat].jailTurns = -1;
+    say(game, `The table voted to free Seat ${jv.seat + 1} from Jail early.`);
+  } else if (choices.length) {
+    say(game, `The table voted for Seat ${jv.seat + 1} to stay in Jail.`);
+  }
+  game.jailVote = null;
 }
 
 function moveTo(game, seat, index, { collectGo = true } = {}) {
@@ -329,6 +358,9 @@ function nextTurn(game) {
     next = (next + 1) % game.players.length;
     if (!game.players[next].bankrupt) break;
   }
+  // Never let the jailed player's own turn come up before the table's
+  // vote is settled — resolve it with whatever votes are in so far.
+  if (game.jailVote && game.jailVote.seat === next) resolveJailVote(game);
   game.turn = next;
   game.phase = "roll";
 }
@@ -740,6 +772,22 @@ function attachMonopoly(io, socket, ctx) {
     p.getOut -= 1;
     p.jailTurns = -1;
     say(game, `Seat ${seat + 1} used a Get Out of Jail Free card.`);
+    pushState(roomId);
+  });
+
+  // Any seated player can vote on a jailed table-mate — it doesn't need
+  // to be your turn, and the jailed player themself isn't eligible.
+  socket.on("mono:jail_vote", ({ roomId, choice }) => {
+    const room = myRoom(roomId);
+    if (!room || room.status !== "playing") return;
+    const game = room.game;
+    const jv = game.jailVote;
+    if (!jv) return;
+    if (choice !== "free" && choice !== "keep") return;
+    const seat = seatOf(room, socket.userId);
+    if (seat === -1 || !jv.eligible.includes(seat)) return;
+    jv.votes[seat] = choice;
+    if (Object.keys(jv.votes).length >= jv.eligible.length) resolveJailVote(game);
     pushState(roomId);
   });
 
