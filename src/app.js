@@ -1,4 +1,5 @@
 const express = require("express");
+const path = require("path");
 const cors = require("cors");
 const passport = require("./lib/passport");
 
@@ -58,6 +59,11 @@ app.use(
     credentials: true,
   }),
 );
+
+// Legacy uploads (avatars/photos saved before media moved into the
+// database) still live on disk here — keep serving them so old
+// avatarUrl/imageUrl/videoUrl values saved in the DB don't 404.
+app.use("/ohsheet", express.static(path.join(__dirname, "../public/ohsheet")));
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
