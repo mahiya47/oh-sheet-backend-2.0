@@ -32,10 +32,11 @@ const {
 // granular diff events.
 // ==========================================================
 
-// Fixed at 4 players — one seat per corner of the board/screen, matching
-// the HUD layout (top-left, top-right, bottom-left, bottom-right).
+// Up to 4 players — one seat per corner of the board/screen, matching
+// the HUD layout (top-left, top-right, bottom-left, bottom-right). Games
+// can start with as few as 2; the corners just show whoever's seated.
 const MAX_PLAYERS = 4;
-const MIN_PLAYERS = 4;
+const MIN_PLAYERS = 2;
 const LOG_LIMIT = 40;
 // A disconnected player isn't dropped straight away — a game shouldn't
 // die because someone's phone slept. They keep their seat and their turn
