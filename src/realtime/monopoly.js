@@ -480,14 +480,18 @@ function attachMonopoly(io, socket, ctx) {
   }
 
   // The player whose turn it is, if that's this socket and the game is
-  // waiting on `expectedPhase` (or any phase when omitted).
+  // waiting on `expectedPhase` (a single phase, a list of allowed phases,
+  // or any phase when omitted).
   function actor(roomId, expectedPhase) {
     const room = myRoom(roomId);
     if (!room || room.status !== "playing") return null;
     const seat = seatOf(room, socket.userId);
     if (seat === -1 || seat !== room.game.turn) return null;
     if (room.game.phase === "over") return null;
-    if (expectedPhase && room.game.phase !== expectedPhase) return null;
+    if (expectedPhase) {
+      const phases = Array.isArray(expectedPhase) ? expectedPhase : [expectedPhase];
+      if (!phases.includes(room.game.phase)) return null;
+    }
     return { room, seat, game: room.game };
   }
 
@@ -564,9 +568,15 @@ function attachMonopoly(io, socket, ctx) {
   // ---------------- Turn actions ----------------
 
   socket.on("mono:roll", ({ roomId }) => {
-    const found = actor(roomId, "roll");
+    // Normally only valid at the start of your turn ("roll" phase). The
+    // one exception: you rolled doubles and earned another roll, which
+    // leaves you in "action" phase with game.doubles > 0 — let that one
+    // extra case through so the doubles roll happens in a single click
+    // instead of an "acknowledge, then roll" round trip.
+    const found = actor(roomId, ["roll", "action"]);
     if (!found) return;
     const { room, seat, game } = found;
+    if (game.phase === "action" && game.doubles <= 0) return;
     const p = game.players[seat];
 
     const d1 = crypto.randomInt(1, 7);
