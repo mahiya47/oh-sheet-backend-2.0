@@ -1,5 +1,5 @@
 const prisma = require("../lib/prisma");
-const { publicUserSelect } = require("../utils/format");
+const { publicUserSelect, sanitizePublicUser } = require("../utils/format");
 const { createNotification } = require("../utils/notify");
 const { getBotIds, randomBotReplyDelayMs } = require("../lib/bots");
 const { generateCatNoise } = require("../lib/pikku");
@@ -189,12 +189,20 @@ async function getThread(req, res) {
     }
 
     return res.json({
-      user: {
-        id: other.id,
-        name: other.name,
-        username: other.username,
-        avatarUrl: other.avatarUrl,
-      },
+      // other.id === me is impossible here (checked above), so this is
+      // always "the other person" — orientation only comes through when
+      // they've opted in via showOrientation, same rule as everywhere else.
+      user: sanitizePublicUser(
+        {
+          id: other.id,
+          name: other.name,
+          username: other.username,
+          avatarUrl: other.avatarUrl,
+          orientation: other.orientation,
+          showOrientation: other.showOrientation,
+        },
+        me
+      ),
       messages: messages.map((m) => ({
         id: m.id,
         content: m.content,

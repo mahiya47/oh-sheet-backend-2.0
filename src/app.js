@@ -1,5 +1,4 @@
 const express = require("express");
-const path = require("path");
 const cors = require("cors");
 const passport = require("./lib/passport");
 
@@ -59,8 +58,6 @@ app.use(
     credentials: true,
   }),
 );
-
-app.use("/ohsheet", express.static(path.join(__dirname, "../public/ohsheet")));
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));

@@ -13,7 +13,23 @@ const publicUserSelect = {
   emailVerified: true,
   currentStreak: true,
   isPrivate: true,
+  orientation: true,
+  showOrientation: true,
 };
+
+// Same isSelf-or-opted-in gating as user.controller.js's getUserByUsername —
+// orientation only travels to other viewers when the user flipped the
+// showOrientation toggle on; the owner always sees their own value. Used
+// anywhere a publicUserSelect-shaped user (post author, tagged user, DM
+// thread partner) gets sent back out.
+function sanitizePublicUser(user, viewerId) {
+  if (!user) return user;
+  const isSelf = !!viewerId && user.id === viewerId;
+  return {
+    ...user,
+    orientation: isSelf || user.showOrientation ? user.orientation : null,
+  };
+}
 
 const postIncludeForFormat = {
   author: { select: publicUserSelect },
@@ -57,7 +73,7 @@ function formatPost(post, viewerId, followedAuthorIds = new Set(), bookmarkedPos
     published: post.published,
     createdAt: post.createdAt,
     updatedAt: post.updatedAt,
-    author: post.author,
+    author: sanitizePublicUser(post.author, viewerId),
     authorId: post.authorId,
     commentCount: post._count?.comments ?? 0,
     upvotes,
@@ -69,7 +85,7 @@ function formatPost(post, viewerId, followedAuthorIds = new Set(), bookmarkedPos
       : false,
     isOwnPost: viewerId ? post.authorId === viewerId : false,
     tags: (post.tags || []).map((pt) => pt.tag.name),
-    taggedUsers: (post.taggedUsers || []).map((tu) => tu.user),
+    taggedUsers: (post.taggedUsers || []).map((tu) => sanitizePublicUser(tu.user, viewerId)),
     isTaggedInThis: viewerId
       ? (post.taggedUsers || []).some((tu) => tu.userId === viewerId)
       : false,
@@ -104,4 +120,5 @@ module.exports = {
   postIncludeForFormat,
   formatPost,
   buildCommentTree,
+  sanitizePublicUser,
 };

@@ -5,5 +5,3 @@ node_modules/
 _sync_fresh/
 _sync_incoming.tar.gz
 _to_delete/
-public/ohsheet/
-.env.bak*
