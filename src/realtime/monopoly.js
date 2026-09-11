@@ -43,7 +43,7 @@ const LOG_LIMIT = 40;
 // is auto-passed until they come back or the room empties.
 // Seat order matches the 4 HUD corners: top-left, top-right, bottom-left,
 // bottom-right.
-const TOKEN_COLORS = ["#3e9dd8", "#e5484d", "#4caf82", "#f5c945"];
+const TOKEN_COLORS = ["#2f6fed", "#e5484d", "#43a047", "#f5c945"]; // blue, red, green, yellow
 
 function shuffled(n) {
   const arr = Array.from({ length: n }, (_, i) => i);
@@ -139,7 +139,7 @@ function liquidValue(game, seat) {
   for (const [idxStr, st] of Object.entries(game.tiles)) {
     if (st.owner !== seat) continue;
     const tile = BOARD[Number(idxStr)];
-    if (st.houses > 0) total += Math.floor((tile.build / 2) * st.houses);
+    for (let lvl = 0; lvl < st.houses; lvl++) total += Math.floor((tile.build[lvl] || 0) / 2);
     if (!st.mortgaged) total += Math.floor(tile.price / 2);
   }
   return total;
@@ -347,7 +347,10 @@ function bankrupt(game, seat, creditor) {
       // creditor — the classic rule, and it stops a hotel row transferring
       // wholesale on a single bad landing.
       if (st.houses > 0) {
-        game.players[creditor].cash += Math.floor((BOARD[index].build / 2) * st.houses);
+        const buildCosts = BOARD[index].build;
+        for (let lvl = 0; lvl < st.houses; lvl++) {
+          game.players[creditor].cash += Math.floor((buildCosts[lvl] || 0) / 2);
+        }
         st.houses = 0;
       }
     } else {
@@ -374,7 +377,7 @@ function canBuild(game, seat, index) {
   // Even-build: never more than one house ahead of the rest of the group.
   const min = Math.min(...GROUPS[tile.group].map((i) => game.tiles[i]?.houses || 0));
   if (st.houses > min) return false;
-  return game.players[seat].cash >= tile.build;
+  return game.players[seat].cash >= tile.build[st.houses];
 }
 
 function canSellHouse(game, seat, index) {
@@ -618,8 +621,8 @@ function attachMonopoly(io, socket, ctx) {
     if (!["action", "debt"].includes(game.phase)) return;
     if (!canBuild(game, seat, index)) return;
     const tile = BOARD[index];
-    game.players[seat].cash -= tile.build;
     const st = tileState(game, index);
+    game.players[seat].cash -= tile.build[st.houses];
     st.houses += 1;
     const newRent = tile.rent[st.houses];
     say(
@@ -637,7 +640,7 @@ function attachMonopoly(io, socket, ctx) {
     const tile = BOARD[index];
     const st = tileState(game, index);
     st.houses -= 1;
-    game.players[seat].cash += Math.floor(tile.build / 2);
+    game.players[seat].cash += Math.floor(tile.build[st.houses] / 2);
     say(game, `Seat ${seat + 1} downgraded ${tile.name} to level ${st.houses} — rent is now $${tile.rent[st.houses]}.`);
     pushState(roomId);
   });
