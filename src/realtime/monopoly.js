@@ -223,7 +223,10 @@ function drawCard(game, seat, deck, depth = 0) {
     game[posKey] = 0;
   }
   const card = cards[game[key][game[posKey]++]];
-  game.card = { deck, text: card.text };
+  // `seat` says whose card this is — only they can dismiss it, and
+  // everyone else's view is labelled with their name instead of reading
+  // like it happened to them too.
+  game.card = { deck, text: card.text, seat };
   say(game, `Seat ${seat + 1} drew: ${card.text}`);
 
   const p = game.players[seat];
@@ -772,6 +775,19 @@ function attachMonopoly(io, socket, ctx) {
     p.getOut -= 1;
     p.jailTurns = -1;
     say(game, `Seat ${seat + 1} used a Get Out of Jail Free card.`);
+    pushState(roomId);
+  });
+
+  // Only the player who drew the card can dismiss it — everyone else is
+  // just watching, and the card stays up for them too until then.
+  socket.on("mono:card_ack", ({ roomId }) => {
+    const room = myRoom(roomId);
+    if (!room || room.status !== "playing") return;
+    const game = room.game;
+    if (!game.card) return;
+    const seat = seatOf(room, socket.userId);
+    if (seat === -1 || seat !== game.card.seat) return;
+    game.card = null;
     pushState(roomId);
   });
 
