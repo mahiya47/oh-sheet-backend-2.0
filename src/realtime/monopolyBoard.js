@@ -9,8 +9,9 @@
 // Community Chest sitting in the corner that used to be Platform 9¾). No
 // railroads, no tax tiles — kept lean on purpose. Corners: PLATFORM 9¾
 // (this is the start/GO square — it collects $200 same as any GO tile
-// always has, just renamed), AZKABAN (jail / just visiting), a plain
-// COMMUNITY CHEST corner, and the AUCTION HOUSE.
+// always has, just renamed), a plain COMMUNITY CHEST corner, AZKABAN
+// (jail / just visiting), and the AUCTION HOUSE (Diagon Alley — property
+// exchange, see monopoly.js's trade handling).
 //
 // This file is the single source of truth for the RULES side of the
 // board. The frontend has its own display-only copy (geometry only —
@@ -37,7 +38,7 @@ const BOARD = [
   { i: 6, type: "street", name: "Luna Lovegood", group: "lightblue", price: 100, rent: [6, 30, 270, 550], build: [50, 100, 150] },
   { i: 7, type: "street", name: "Cho Chang", group: "lightblue", price: 120, rent: [8, 40, 300, 600], build: [50, 100, 150] },
 
-  { i: 8, type: "jail", name: "Azkaban" },
+  { i: 8, type: "chest", name: "Community Chest" },
 
   { i: 9, type: "street", name: "Fred Weasley", group: "pink", price: 140, rent: [10, 50, 450, 750], build: [100, 200, 300] },
   { i: 10, type: "street", name: "George Weasley", group: "pink", price: 160, rent: [12, 60, 500, 900], build: [100, 200, 300] },
@@ -46,7 +47,7 @@ const BOARD = [
   { i: 13, type: "street", name: "Nymphadora Tonks", group: "orange", price: 180, rent: [14, 70, 550, 950], build: [100, 200, 300] },
   { i: 14, type: "street", name: "Hagrid", group: "orange", price: 200, rent: [16, 80, 600, 1000], build: [100, 200, 300] },
 
-  { i: 15, type: "chest", name: "Community Chest" },
+  { i: 15, type: "jail", name: "Azkaban" },
 
   { i: 16, type: "street", name: "Sirius Black", group: "red", price: 220, rent: [18, 90, 700, 1050], build: [150, 300, 450] },
   { i: 17, type: "chance", name: "Chance" },
@@ -69,7 +70,7 @@ const BOARD = [
 const BOARD_SIZE = BOARD.length; // 30
 const GO_SALARY = 200;
 const START_CASH = 1500;
-const JAIL_INDEX = 8;
+const JAIL_INDEX = 15;
 const JAIL_FINE = 50;
 const MAX_HOUSES = 3; // 3 === max upgrade level
 

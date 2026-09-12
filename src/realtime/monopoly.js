@@ -69,7 +69,7 @@ function initGame(playerCount) {
       color: TOKEN_COLORS[seat],
       cash: START_CASH,
       pos: 0,
-      jailTurns: -1, // -1 = not in jail, 0..2 = turns served
+      jailTurns: -1, // -1 = not in jail, 0..3 = turns served
       getOut: 0, // Get Out of Jail Free cards held
       bankrupt: false,
       connected: true,
@@ -83,6 +83,7 @@ function initGame(playerCount) {
     pending: null, // { type: "buy", index } | { type: "debt", amount, creditor }
     card: null, // last drawn card, for the card popup
     jailVote: null, // { seat, eligible: [seats], votes: { seat: "free"|"keep" } }
+    trade: null, // { seat, offerIndex, targetSeat, targetIndex } — Diagon Alley property exchange
     log: [],
     winner: null,
     started: Date.now(),
@@ -109,6 +110,17 @@ function ownsGroup(game, seat, group) {
 
 function activeSeats(game) {
   return game.players.filter((p) => !p.bankrupt).map((p) => p.seat);
+}
+
+// Properties a seat could offer or be offered in a Diagon Alley trade —
+// owned by them and with no upgrades built (the classic rule: you can't
+// trade a property with houses/hotels on it).
+function tradeableProps(game, seat) {
+  const out = [];
+  for (const [idxStr, st] of Object.entries(game.tiles)) {
+    if (st.owner === seat && st.houses === 0) out.push(Number(idxStr));
+  }
+  return out.sort((a, b) => a - b);
 }
 
 // --- Money -----------------------------------------------------------
@@ -168,27 +180,45 @@ function pay(game, seat, amount) {
 
 // --- Movement & landing ----------------------------------------------
 
+// Who gets a vote on a given jailed seat: everyone still in the game,
+// except the jailed player themself, anyone else currently in Jail (they
+// don't get a say while they're in there too), and anyone disconnected
+// right now (treated the same as a jailed player — skipped, not counted).
+function jailVoteEligible(game, seat) {
+  return activeSeats(game).filter(
+    (s) => s !== seat && game.players[s].jailTurns < 0 && game.players[s].connected,
+  );
+}
+
 function goToJail(game, seat) {
+  const eligible = jailVoteEligible(game, seat);
+  if (eligible.length === 0) {
+    // Nobody left outside Jail to vote on it — e.g. everyone else at the
+    // table is already in there. Nothing to decide, so they just carry on
+    // instead of sitting in an unvotable Jail forever.
+    say(game, `Seat ${seat + 1} would be sent to Jail, but no one is free to vote — they carry on.`);
+    return;
+  }
   const p = game.players[seat];
   p.pos = JAIL_INDEX;
   p.jailTurns = 0;
   game.doubles = 0;
   say(game, `Seat ${seat + 1} was sent to Jail.`);
-  startJailVote(game, seat);
+  game.jailVote = { seat, eligible, votes: {} };
 }
 
-// Everyone else at the table gets a say: free the jailed player right
-// away, or leave them to serve their time as normal. Starts fresh each
-// time someone lands in Jail, replacing any vote already in progress.
-function startJailVote(game, seat) {
-  const eligible = activeSeats(game).filter((s) => s !== seat);
-  game.jailVote = eligible.length ? { seat, eligible, votes: {} } : null;
+// Voters who disconnect mid-vote are skipped rather than counted as a
+// pending vote — same treatment as a voter who's in Jail themselves.
+function jailVoteStillWaitingOn(game) {
+  const jv = game.jailVote;
+  if (!jv) return [];
+  return jv.eligible.filter((s) => game.players[s].connected && jv.votes[s] === undefined);
 }
 
 // Majority of votes cast wins; a tie (or nobody voting at all) leaves the
-// player in Jail as normal. Called once every eligible voter has voted,
-// and as a safety net right before the jailed player's own turn comes up
-// again, so a slow voter can never stall the table.
+// player in Jail as normal. Called once every still-connected eligible
+// voter has voted, and as a safety net right before the jailed player's
+// own turn comes up again, so a slow voter can never stall the table.
 function resolveJailVote(game) {
   const jv = game.jailVote;
   if (!jv) return;
@@ -199,7 +229,7 @@ function resolveJailVote(game) {
     game.players[jv.seat].jailTurns = -1;
     say(game, `The table voted to free Seat ${jv.seat + 1} from Jail early.`);
   } else if (choices.length) {
-    say(game, `The table voted for Seat ${jv.seat + 1} to stay in Jail.`);
+    say(game, `The table voted for Seat ${jv.seat + 1} to stay in Jail (a tie stays in Jail).`);
   }
   game.jailVote = null;
 }
@@ -310,6 +340,22 @@ function resolveLanding(game, seat, diceTotal, depth = 0, rentMultiplier = 1) {
     drawCard(game, seat, tile.type === "chance" ? "chance" : "chest", depth);
     return;
   }
+  if (tile.type === "auction") {
+    // Diagon Alley — offer a property exchange, but only if there's
+    // actually something to trade: the landing player owns at least one
+    // untouched (no-upgrade) property, and someone else does too. If not,
+    // nothing happens and the turn just continues.
+    const mine = tradeableProps(game, seat);
+    const someoneElseHasOne = activeSeats(game).some(
+      (s) => s !== seat && tradeableProps(game, s).length > 0,
+    );
+    if (mine.length > 0 && someoneElseHasOne) {
+      game.phase = "trade_offer";
+      game.pending = { type: "trade_offer" };
+      say(game, `Seat ${seat + 1} landed on Diagon Alley — choosing a property to trade.`);
+    }
+    return;
+  }
   if (!BUYABLE.has(index)) return; // GO, jail visit, free parking
 
   const owner = ownerOf(game, index);
@@ -338,8 +384,9 @@ function resolveLanding(game, seat, diceTotal, depth = 0, rentMultiplier = 1) {
 
 function settleAfterAction(game) {
   // Called after any resolution step: debt takes priority, then a pending
-  // purchase decision, otherwise the player is free to manage/end.
-  if (game.phase === "debt" || game.phase === "buy" || game.phase === "over") return;
+  // purchase decision or Diagon Alley trade, otherwise the player is free
+  // to manage/end.
+  if (["debt", "buy", "over", "trade_offer", "trade_response"].includes(game.phase)) return;
   game.phase = "action";
 }
 
@@ -354,6 +401,7 @@ function nextTurn(game) {
   game.dice = null;
   game.card = null;
   game.pending = null;
+  game.trade = null;
   game.doubles = 0;
 
   let next = game.turn;
@@ -594,7 +642,7 @@ function attachMonopoly(io, socket, ctx) {
         resolveLanding(game, seat, total);
       } else {
         p.jailTurns += 1;
-        if (p.jailTurns >= 3) {
+        if (p.jailTurns >= 4) {
           say(game, `Seat ${seat + 1} served their time and paid the $${JAIL_FINE} fine.`);
           if (charge(game, seat, JAIL_FINE)) {
             p.jailTurns = -1;
@@ -763,19 +811,6 @@ function attachMonopoly(io, socket, ctx) {
     pushState(roomId);
   });
 
-  socket.on("mono:jail_pay", ({ roomId }) => {
-    const found = actor(roomId, "roll");
-    if (!found) return;
-    const { game, seat } = found;
-    const p = game.players[seat];
-    if (p.jailTurns < 0) return;
-    if (p.cash < JAIL_FINE) return;
-    p.cash -= JAIL_FINE;
-    p.jailTurns = -1;
-    say(game, `Seat ${seat + 1} paid $${JAIL_FINE} to leave Jail.`);
-    pushState(roomId);
-  });
-
   socket.on("mono:jail_card", ({ roomId }) => {
     const found = actor(roomId, "roll");
     if (!found) return;
@@ -785,6 +820,76 @@ function attachMonopoly(io, socket, ctx) {
     p.getOut -= 1;
     p.jailTurns = -1;
     say(game, `Seat ${seat + 1} used a Get Out of Jail Free card.`);
+    pushState(roomId);
+  });
+
+  // ---------------- Diagon Alley trade ----------------
+  // Landing there put the game in "trade_offer" phase for whoever landed
+  // (see resolveLanding). They pick one of their own untouched properties
+  // plus one belonging to anyone else in a single call — the frontend
+  // handles the two-step picker locally and only sends this once both are
+  // chosen. Backing out beforehand is mono:trade_cancel instead.
+  socket.on("mono:trade_propose", ({ roomId, offerIndex, targetIndex }) => {
+    const found = actor(roomId, "trade_offer");
+    if (!found) return;
+    const { game, seat } = found;
+    const offerSt = game.tiles[offerIndex];
+    const targetSt = game.tiles[targetIndex];
+    if (!offerSt || offerSt.owner !== seat || offerSt.houses !== 0) return;
+    if (!targetSt || targetSt.owner === null || targetSt.owner === seat || targetSt.houses !== 0) return;
+    if (game.players[targetSt.owner].bankrupt) return;
+
+    game.trade = { seat, offerIndex, targetSeat: targetSt.owner, targetIndex };
+    game.pending = null;
+    game.phase = "trade_response";
+    say(
+      game,
+      `Seat ${seat + 1} offered ${BOARD[offerIndex].name} for Seat ${targetSt.owner + 1}'s ${BOARD[targetIndex].name}.`,
+    );
+    pushState(roomId);
+  });
+
+  socket.on("mono:trade_cancel", ({ roomId }) => {
+    const found = actor(roomId, "trade_offer");
+    if (!found) return;
+    const { game } = found;
+    game.pending = null;
+    game.phase = "action";
+    pushState(roomId);
+  });
+
+  // Only the property's owner can answer — it doesn't need to be their
+  // turn, same as a Jail vote. Everyone else just watches until they do.
+  socket.on("mono:trade_respond", ({ roomId, choice }) => {
+    const room = myRoom(roomId);
+    if (!room || room.status !== "playing") return;
+    const game = room.game;
+    const trade = game.trade;
+    if (!trade) return;
+    if (choice !== "accept" && choice !== "deny") return;
+    const seat = seatOf(room, socket.userId);
+    if (seat === -1 || seat !== trade.targetSeat) return;
+
+    if (choice === "accept") {
+      const offerSt = game.tiles[trade.offerIndex];
+      const targetSt = game.tiles[trade.targetIndex];
+      // Re-check nothing shifted underneath since the offer was made
+      // (a mortgage, a bankruptcy) before actually swapping anything.
+      if (offerSt && targetSt && offerSt.owner === trade.seat && targetSt.owner === trade.targetSeat) {
+        offerSt.owner = trade.targetSeat;
+        targetSt.owner = trade.seat;
+        game.players[trade.seat].cash += 100;
+        game.players[trade.targetSeat].cash += 100;
+        say(
+          game,
+          `Seat ${trade.seat + 1} and Seat ${trade.targetSeat + 1} swapped ${BOARD[trade.offerIndex].name} for ${BOARD[trade.targetIndex].name} — both collected $100.`,
+        );
+      }
+    } else {
+      say(game, `Seat ${trade.targetSeat + 1} turned down the trade.`);
+    }
+    game.trade = null;
+    game.phase = "action";
     pushState(roomId);
   });
 
@@ -812,8 +917,9 @@ function attachMonopoly(io, socket, ctx) {
     if (choice !== "free" && choice !== "keep") return;
     const seat = seatOf(room, socket.userId);
     if (seat === -1 || !jv.eligible.includes(seat)) return;
+    if (jv.votes[seat] !== undefined) return;
     jv.votes[seat] = choice;
-    if (Object.keys(jv.votes).length >= jv.eligible.length) resolveJailVote(game);
+    if (jailVoteStillWaitingOn(game).length === 0) resolveJailVote(game);
     pushState(roomId);
   });
 
