@@ -335,6 +335,14 @@ function resolveLanding(game, seat, diceTotal, depth = 0, rentMultiplier = 1) {
     charge(game, seat, tile.amount);
     return;
   }
+  if (tile.type === "jail") {
+    // Landing on Azkaban puts you IN it (and starts the table's vote) —
+    // this board has no separate "Go To Jail" square, so without this
+    // the only ways in would be a card or three doubles, and the jail
+    // vote would almost never come up.
+    goToJail(game, seat);
+    return;
+  }
   if (tile.type === "chance" || tile.type === "chest") {
     if (depth >= 2) return; // don't chain card draws forever
     drawCard(game, seat, tile.type === "chance" ? "chance" : "chest", depth);
