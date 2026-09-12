@@ -19,7 +19,6 @@ const arcadeRoutes = require("./routes/arcade.routes");
 const analyticsRoutes = require("./routes/analytics.routes");
 const pushRoutes = require("./routes/push.routes");
 const storyRoutes = require("./routes/story.routes");
-const { generalLimiter } = require("./middleware/rateLimit");
 const { sendServerError } = require("./lib/errorLog");
 const { sitemap, robotsTxt } = require("./controllers/seo.controller");
 const { feed } = require("./controllers/feed.controller");
@@ -68,10 +67,6 @@ app.use("/ohsheet", express.static(path.join(__dirname, "../public/ohsheet")));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 app.use(passport.initialize());
-
-// Broad safety net first, tighter per-route limiters layer on top of it
-// inside their own route files (auth, reports).
-app.use("/api", generalLimiter);
 
 app.use("/api/auth", authRoutes);
 app.use("/api/posts", postRoutes);

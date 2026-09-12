@@ -2,7 +2,6 @@ const express = require("express");
 const router = express.Router();
 const authMiddleware = require("../middleware/auth");
 const passport = require("../lib/passport");
-const { authLimiter } = require("../middleware/rateLimit");
 const {
   register,
   login,
@@ -31,9 +30,9 @@ const {
   verifyLogin: verifyPasskeyLogin,
 } = require("../controllers/passkey.controller");
 
-router.post("/register", authLimiter, register);
-router.post("/login", authLimiter, login);
-router.post("/2fa/verify-login", authLimiter, verifyLogin2FA);
+router.post("/register", register);
+router.post("/login", login);
+router.post("/2fa/verify-login", verifyLogin2FA);
 router.get("/me", authMiddleware, getMe);
 router.delete("/me", authMiddleware, deleteAccount);
 
@@ -56,13 +55,13 @@ router.get("/passkeys", authMiddleware, listPasskeys);
 router.post("/passkeys/register-options", authMiddleware, generateRegisterOptions);
 router.post("/passkeys/register-verify", authMiddleware, verifyRegister);
 router.delete("/passkeys/:id", authMiddleware, deletePasskey);
-router.post("/passkeys/login-options", authLimiter, generateLoginOptions);
-router.post("/passkeys/login-verify", authLimiter, verifyPasskeyLogin);
+router.post("/passkeys/login-options", generateLoginOptions);
+router.post("/passkeys/login-verify", verifyPasskeyLogin);
 
 router.get("/verify/:token", verifyEmail);
 router.post("/resend-verification", authMiddleware, resendVerification);
-router.post("/forgot-password", authLimiter, forgotPassword);
-router.post("/reset-password/:token", authLimiter, resetPassword);
+router.post("/forgot-password", forgotPassword);
+router.post("/reset-password/:token", resetPassword);
 
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5174";
 
