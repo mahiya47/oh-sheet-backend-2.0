@@ -1,6 +1,9 @@
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const prisma = require("./prisma");
+const { generateWelcomeMessage } = require("./groq");
+const { generateCatNoise } = require("./pikku");
+const { createNotification } = require("../utils/notify");
 
 // Two companion accounts that live alongside real users: Pikku The Cat
 // (canned meows) and Tonald Drump (a parody billionaire, Groq-powered
@@ -84,4 +87,49 @@ function randomBotReplyDelayMs() {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-module.exports = { ensureBotUsers, getBotIds, randomBotCommentDelayMs, randomBotReplyDelayMs, BOT_USERNAMES };
+// Fire the bot welcome DMs to a brand-new account — fire-and-forget (not
+// awaited by the caller) so a slow Groq call or a DB hiccup never delays
+// the signup response. Each bot's DM is wrapped in its own try/catch so
+// one failing doesn't stop the other from sending.
+//
+// Shared by every account-creation path (email/password AND both OAuth
+// strategies) — it used to live only in auth.controller.js's register()
+// handler, so a Google/GitHub signup created no welcome DM at all.
+function sendBotWelcomeDms(user) {
+  (async () => {
+    const bots = getBotIds();
+    if (!bots) return; // server started before bot accounts finished setting up
+
+    if (bots.tonald && bots.tonald !== user.id) {
+      try {
+        const welcomeText = await generateWelcomeMessage(user.name || user.username);
+        await prisma.directMessage.create({
+          data: { content: welcomeText.slice(0, 1000), senderId: bots.tonald, receiverId: user.id },
+        });
+        await createNotification({ recipientId: user.id, actorId: bots.tonald, type: "dm" });
+      } catch (e) {
+        console.error("Tonald welcome DM failed:", e.message);
+      }
+    }
+
+    if (bots.pikku && bots.pikku !== user.id) {
+      try {
+        await prisma.directMessage.create({
+          data: { content: generateCatNoise(), senderId: bots.pikku, receiverId: user.id },
+        });
+        await createNotification({ recipientId: user.id, actorId: bots.pikku, type: "dm" });
+      } catch (e) {
+        console.error("Pikku welcome DM failed:", e.message);
+      }
+    }
+  })();
+}
+
+module.exports = {
+  ensureBotUsers,
+  getBotIds,
+  randomBotCommentDelayMs,
+  randomBotReplyDelayMs,
+  BOT_USERNAMES,
+  sendBotWelcomeDms,
+};

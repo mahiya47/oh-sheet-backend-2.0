@@ -5,11 +5,9 @@ const { UAParser } = require("ua-parser-js");
 const prisma = require("../lib/prisma");
 const { publicUserSelect } = require("../utils/format");
 const { sendVerificationEmail, sendPasswordResetEmail } = require("../lib/email");
-const { createNotification } = require("../utils/notify");
 const { applyLoginStreak } = require("../utils/streak");
-const { generateWelcomeMessage } = require("../lib/groq");
-const { generateCatNoise } = require("../lib/pikku");
-const { getBotIds } = require("../lib/bots");
+const { sendBotWelcomeDms } = require("../lib/bots");
+const { followCreatorIfNew } = require("../lib/creator");
 const { sendServerError } = require("../lib/errorLog");
 const {
   generateSecret,
@@ -19,8 +17,6 @@ const {
   hashBackupCodes,
   consumeBackupCode,
 } = require("../lib/twoFactor");
-
-const CREATOR_USERNAME = "sourabhmahiya";
 
 function signToken(user, jti) {
   const payload = { userId: user.id, email: user.email };
@@ -85,54 +81,6 @@ async function getOAuthLinkNonce(req, res) {
   } catch (error) {
     return sendServerError(res, error, req);
   }
-}
-
-// Mirrors the username-based creator lookup in lib/passport.js — kept as
-// its own small helper here rather than hard-coding an id, since ids
-// aren't stable between the production database and a fresh/local one.
-async function followCreatorIfNew(userId) {
-  try {
-    const creator = await prisma.user.findFirst({ where: { username: CREATOR_USERNAME } });
-    if (creator && creator.id !== userId) {
-      await prisma.follow.create({ data: { followerId: userId, followingId: creator.id } });
-    }
-  } catch {
-    // Not fatal — creator account may not exist in this DB yet.
-  }
-}
-
-// Fire the bot welcome DMs — fire-and-forget (not awaited by the caller)
-// so a slow Groq call or a DB hiccup never delays the signup response.
-// Each bot's DM is wrapped in its own try/catch so one failing doesn't
-// stop the other from sending.
-function sendBotWelcomeDms(user) {
-  (async () => {
-    const bots = getBotIds();
-    if (!bots) return; // server started before bot accounts finished setting up
-
-    if (bots.tonald && bots.tonald !== user.id) {
-      try {
-        const welcomeText = await generateWelcomeMessage(user.name || user.username);
-        await prisma.directMessage.create({
-          data: { content: welcomeText.slice(0, 1000), senderId: bots.tonald, receiverId: user.id },
-        });
-        await createNotification({ recipientId: user.id, actorId: bots.tonald, type: "dm" });
-      } catch (e) {
-        console.error("Tonald welcome DM failed:", e.message);
-      }
-    }
-
-    if (bots.pikku && bots.pikku !== user.id) {
-      try {
-        await prisma.directMessage.create({
-          data: { content: generateCatNoise(), senderId: bots.pikku, receiverId: user.id },
-        });
-        await createNotification({ recipientId: user.id, actorId: bots.pikku, type: "dm" });
-      } catch (e) {
-        console.error("Pikku welcome DM failed:", e.message);
-      }
-    }
-  })();
 }
 
 async function register(req, res) {

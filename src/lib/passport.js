@@ -16,8 +16,8 @@ const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const GitHubStrategy = require("passport-github2").Strategy;
 const jwt = require("jsonwebtoken");
 const prisma = require("./prisma");
-
-const CREATOR_USERNAME = "sourabhmahiya";
+const { followCreatorIfNew } = require("./creator");
+const { sendBotWelcomeDms } = require("./bots");
 
 // The one `state` blob carries two independent, optional signals set by
 // auth.routes.js: `link` (an existing logged-in user attaching this OAuth
@@ -66,18 +66,6 @@ async function uniqueUsername(base) {
     username = `${cleaned}${suffix}`;
   }
   return username;
-}
-
-async function followCreatorIfNew(user) {
-  try {
-    const creator = await prisma.user.findFirst({ where: { username: CREATOR_USERNAME } });
-    if (creator && creator.id !== user.id) {
-      await prisma.follow.create({ data: { followerId: user.id, followingId: creator.id } });
-    }
-  } catch {
-    // Already following, creator account doesn't exist in this DB, etc. —
-    // never let this block account creation.
-  }
 }
 
 const googleEnabled = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
@@ -142,7 +130,8 @@ if (googleEnabled) {
                 },
               });
               user.isNewUser = true;
-              await followCreatorIfNew(user);
+              await followCreatorIfNew(user.id);
+              sendBotWelcomeDms(user);
             }
           }
 
@@ -213,7 +202,8 @@ if (githubEnabled) {
                 },
               });
               user.isNewUser = true;
-              await followCreatorIfNew(user);
+              await followCreatorIfNew(user.id);
+              sendBotWelcomeDms(user);
             }
           }
 
