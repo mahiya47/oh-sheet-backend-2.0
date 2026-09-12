@@ -12,7 +12,6 @@ const {
   GO_SALARY,
   START_CASH,
   JAIL_INDEX,
-  JAIL_FINE,
   MAX_HOUSES,
 } = require("./monopolyBoard");
 
@@ -38,6 +37,11 @@ const {
 const MAX_PLAYERS = 4;
 const MIN_PLAYERS = 2;
 const LOG_LIMIT = 40;
+// Turns a jailed player sits out before walking free on their own. There
+// is no rolling your way out and no fine to buy your way out — the only
+// early exits are the table voting you free, or a Get Out of Jail Free
+// card.
+const JAIL_TURNS = 4;
 // A disconnected player isn't dropped straight away — a game shouldn't
 // die because someone's phone slept. They keep their seat and their turn
 // is auto-passed until they come back or the room empties.
@@ -69,7 +73,7 @@ function initGame(playerCount) {
       color: TOKEN_COLORS[seat],
       cash: START_CASH,
       pos: 0,
-      jailTurns: -1, // -1 = not in jail, 0..3 = turns served
+      jailTurns: -1, // -1 = not in jail, 0..JAIL_TURNS = turns served
       getOut: 0, // Get Out of Jail Free cards held
       bankrupt: false,
       connected: true,
@@ -412,16 +416,49 @@ function nextTurn(game) {
   game.trade = null;
   game.doubles = 0;
 
+  // Walk forward to the next player who can actually take a turn.
+  // Someone still serving time in Jail doesn't get one: their turn is
+  // served for them here and play moves straight on. They have no roll,
+  // no actions and no End turn — the only ways out are the table's vote,
+  // a Get Out of Jail Free card, or sitting out all JAIL_TURNS turns.
   let next = game.turn;
-  for (let guard = 0; guard < BOARD_SIZE; guard++) {
+  for (let guard = 0; guard < game.players.length * (JAIL_TURNS + 2); guard++) {
     next = (next + 1) % game.players.length;
-    if (!game.players[next].bankrupt) break;
+    if (game.players[next].bankrupt) continue;
+
+    // Never let a jailed player's own turn come up before the table's
+    // vote on them is settled — resolve it with whatever votes are in so
+    // far, so a "free them" result lets them play this turn normally.
+    if (game.jailVote && game.jailVote.seat === next) resolveJailVote(game);
+
+    const p = game.players[next];
+    if (p.jailTurns < 0) break; // not in Jail — this turn is theirs
+
+    if (p.jailTurns >= JAIL_TURNS) {
+      p.jailTurns = -1;
+      say(game, `Seat ${next + 1} served their time and walked out of Jail.`);
+      break; // out, and they play this turn
+    }
+
+    p.jailTurns += 1;
+    const left = JAIL_TURNS - p.jailTurns;
+    say(game, `Seat ${next + 1} sat out a turn in Jail — ${left} to go.`);
+    // still inside: loop round to the next player
   }
-  // Never let the jailed player's own turn come up before the table's
-  // vote is settled — resolve it with whatever votes are in so far.
-  if (game.jailVote && game.jailVote.seat === next) resolveJailVote(game);
   game.turn = next;
   game.phase = "roll";
+}
+
+// A player sent to Jail mid-turn has nothing left to do — no roll, no
+// End turn button — so the server closes their turn for them. Held back
+// while a drawn card is still on screen, so they get to read the card
+// that put them there first (card_ack calls this again once it's gone).
+function endJailedTurn(game, seat) {
+  if (game.turn !== seat) return;
+  if (game.players[seat].jailTurns < 0) return;
+  if (game.phase !== "action") return;
+  if (game.card) return;
+  nextTurn(game);
 }
 
 function bankrupt(game, seat, creditor) {
@@ -642,29 +679,11 @@ function attachMonopoly(io, socket, ctx) {
     const isDouble = d1 === d2;
     const total = d1 + d2;
 
-    if (p.jailTurns >= 0) {
-      if (isDouble) {
-        p.jailTurns = -1;
-        say(game, `Seat ${seat + 1} rolled doubles and left Jail.`);
-        moveTo(game, seat, (p.pos + total) % BOARD_SIZE);
-        resolveLanding(game, seat, total);
-      } else {
-        p.jailTurns += 1;
-        if (p.jailTurns >= 4) {
-          say(game, `Seat ${seat + 1} served their time and paid the $${JAIL_FINE} fine.`);
-          if (charge(game, seat, JAIL_FINE)) {
-            p.jailTurns = -1;
-            moveTo(game, seat, (p.pos + total) % BOARD_SIZE);
-            resolveLanding(game, seat, total);
-          }
-        } else {
-          say(game, `Seat ${seat + 1} stayed in Jail.`);
-        }
-      }
-      settleAfterAction(game);
-      pushState(roomId);
-      return;
-    }
+    // In Jail means no turn at all — nextTurn serves the time and skips
+    // straight past them, so a roll should never arrive from someone in
+    // there. Ignored rather than trusted, since the client is never the
+    // authority on this.
+    if (p.jailTurns >= 0) return;
 
     if (isDouble) {
       game.doubles += 1;
@@ -672,6 +691,7 @@ function attachMonopoly(io, socket, ctx) {
         say(game, `Seat ${seat + 1} rolled three doubles in a row — off to Jail.`);
         goToJail(game, seat);
         game.phase = "action";
+        endJailedTurn(game, seat);
         pushState(roomId);
         return;
       }
@@ -683,6 +703,7 @@ function attachMonopoly(io, socket, ctx) {
     moveTo(game, seat, (p.pos + total) % BOARD_SIZE);
     resolveLanding(game, seat, total);
     settleAfterAction(game);
+    endJailedTurn(game, seat);
     pushState(roomId);
   });
 
@@ -789,6 +810,9 @@ function attachMonopoly(io, socket, ctx) {
     say(game, `Seat ${seat + 1} settled a debt of $${debt.amount}.`);
     game.pending = null;
     game.phase = "action";
+    // Settling was the last thing owed on a turn that ended in Jail —
+    // close it out, since they get no End turn button in there.
+    endJailedTurn(game, seat);
     pushState(roomId);
   });
 
@@ -819,15 +843,22 @@ function attachMonopoly(io, socket, ctx) {
     pushState(roomId);
   });
 
+  // Playable at any point while you're inside, not just on your turn —
+  // a jailed player doesn't get a turn to play it on any more.
   socket.on("mono:jail_card", ({ roomId }) => {
-    const found = actor(roomId, "roll");
-    if (!found) return;
-    const { game, seat } = found;
+    const room = myRoom(roomId);
+    if (!room || room.status !== "playing") return;
+    const game = room.game;
+    if (game.phase === "over") return;
+    const seat = seatOf(room, socket.userId);
+    if (seat === -1) return;
     const p = game.players[seat];
-    if (p.jailTurns < 0 || p.getOut <= 0) return;
+    if (p.bankrupt || p.jailTurns < 0 || p.getOut <= 0) return;
     p.getOut -= 1;
     p.jailTurns = -1;
     say(game, `Seat ${seat + 1} used a Get Out of Jail Free card.`);
+    // Their release settles any vote that was running on them.
+    if (game.jailVote && game.jailVote.seat === seat) game.jailVote = null;
     pushState(roomId);
   });
 
@@ -911,6 +942,9 @@ function attachMonopoly(io, socket, ctx) {
     const seat = seatOf(room, socket.userId);
     if (seat === -1 || seat !== game.card.seat) return;
     game.card = null;
+    // If that card is what put them in Jail, this was the last thing left
+    // on their turn — close it out for them (they get no End turn).
+    endJailedTurn(game, seat);
     pushState(roomId);
   });
 
