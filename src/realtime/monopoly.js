@@ -41,7 +41,18 @@ const LOG_LIMIT = 40;
 // is no rolling your way out and no fine to buy your way out — the only
 // early exits are the table voting you free, or a Get Out of Jail Free
 // card.
-const JAIL_TURNS = 4;
+const JAIL_TURNS = 3;
+// House rule: reach this much net worth (cash + face value of everything
+// you own — same estimate the client already shows under each player's
+// cash) and you win outright, no need to bankrupt the whole table.
+const WIN_NET_WORTH = 7500;
+// What it costs a jailed player to buy off one "keep" vote after a jail
+// vote doesn't go their way — paid straight to that voter, not the bank.
+const JAIL_BRIBE_AMOUNT = 50;
+// A voluntary downgrade refunds this fraction of what the level cost to
+// build — deliberately better than the 50% you get for a house lost to
+// bankruptcy, since this is a choice, not a forced liquidation.
+const DOWNGRADE_REFUND_RATE = 0.65;
 // A disconnected player isn't dropped straight away — a game shouldn't
 // die because someone's phone slept. They keep their seat and their turn
 // is auto-passed until they come back or the room empties.
@@ -87,6 +98,7 @@ function initGame(playerCount) {
     pending: null, // { type: "buy", index } | { type: "debt", amount, creditor }
     card: null, // last drawn card, for the card popup
     jailVote: null, // { seat, eligible: [seats], votes: { seat: "free"|"keep" } }
+    jailBribes: null, // { seat, votes } — snapshot left behind once a jail vote keeps someone in, so they can buy off a "keep" vote
     trade: null, // { seat, offerIndex, targetSeat, targetIndex } — Diagon Alley property exchange
     log: [],
     winner: null,
@@ -129,7 +141,7 @@ function tradeableProps(game, seat) {
 
 // --- Money -----------------------------------------------------------
 
-function rentFor(game, index, diceTotal) {
+function rentFor(game, index) {
   const tile = BOARD[index];
   const st = game.tiles[index];
   if (!st || st.owner === null || st.mortgaged) return 0;
@@ -143,8 +155,12 @@ function rentFor(game, index, diceTotal) {
     return RAIL_RENT[owned - 1] || 0;
   }
   if (tile.type === "utility") {
+    // Fixed rent tiers now (BOARD's utility tiles carry their own `rent`
+    // array) — with only one die there's no dice total left to multiply,
+    // so rent just scales with how many of the 4 Hogwarts Houses this
+    // owner holds, same shape as a street's colour-set bonus.
     const owned = UTILITY_TILES.filter((i) => ownerOf(game, i) === st.owner).length;
-    return diceTotal * (owned >= UTILITY_TILES.length ? 10 : 4);
+    return tile.rent[Math.min(owned, tile.rent.length) - 1] || 0;
   }
   return 0;
 }
@@ -209,6 +225,9 @@ function goToJail(game, seat) {
   game.doubles = 0;
   say(game, `Seat ${seat + 1} was sent to Jail.`);
   game.jailVote = { seat, eligible, votes: {} };
+  // Any bribe state left over from a previous stay in Jail no longer
+  // applies to this fresh sentence.
+  if (game.jailBribes && game.jailBribes.seat === seat) game.jailBribes = null;
 }
 
 // Voters who disconnect mid-vote are skipped rather than counted as a
@@ -232,8 +251,14 @@ function resolveJailVote(game) {
   if (freeCount > keepCount) {
     game.players[jv.seat].jailTurns = -1;
     say(game, `The table voted to free Seat ${jv.seat + 1} from Jail early.`);
-  } else if (choices.length) {
-    say(game, `The table voted for Seat ${jv.seat + 1} to stay in Jail (a tie stays in Jail).`);
+    game.jailBribes = null;
+  } else {
+    if (choices.length) {
+      say(game, `The table voted for Seat ${jv.seat + 1} to stay in Jail (a tie stays in Jail).`);
+    }
+    // Still in — but now they can see exactly who voted which way and
+    // buy off any "keep" vote (see mono:jail_bribe) to flip it to "free".
+    game.jailBribes = { seat: jv.seat, votes: { ...jv.votes } };
   }
   game.jailVote = null;
 }
@@ -271,12 +296,12 @@ function drawCard(game, seat, deck, depth = 0) {
       break;
     case "moveTo":
       moveTo(game, seat, card.index);
-      resolveLanding(game, seat, null, depth + 1);
+      resolveLanding(game, seat, depth + 1);
       break;
     case "moveBy": {
       let next = (p.pos + card.delta + BOARD_SIZE) % BOARD_SIZE;
       p.pos = next; // going back never pays GO
-      resolveLanding(game, seat, null, depth + 1);
+      resolveLanding(game, seat, depth + 1);
       break;
     }
     case "jail":
@@ -294,7 +319,7 @@ function drawCard(game, seat, deck, depth = 0) {
         if (targets.includes(idx)) { best = idx; break; }
       }
       moveTo(game, seat, best);
-      resolveLanding(game, seat, null, depth + 1, card.kind === "nearestRail" ? 2 : 1);
+      resolveLanding(game, seat, depth + 1, card.kind === "nearestRail" ? 2 : 1);
       break;
     }
     case "eachPlayer": {
@@ -324,11 +349,10 @@ function drawCard(game, seat, deck, depth = 0) {
 
 // Work out what happens on the tile a player just landed on.
 // `rentMultiplier` supports the "pay double rent" chance cards.
-function resolveLanding(game, seat, diceTotal, depth = 0, rentMultiplier = 1) {
+function resolveLanding(game, seat, depth = 0, rentMultiplier = 1) {
   const p = game.players[seat];
   const index = p.pos;
   const tile = BOARD[index];
-  const total = diceTotal ?? (game.dice ? game.dice[0] + game.dice[1] : crypto.randomInt(2, 13));
 
   if (tile.type === "gotojail") {
     goToJail(game, seat);
@@ -385,7 +409,7 @@ function resolveLanding(game, seat, diceTotal, depth = 0, rentMultiplier = 1) {
     say(game, `${tile.name} is mortgaged — no rent due.`);
     return;
   }
-  const rent = rentFor(game, index, total) * rentMultiplier;
+  const rent = rentFor(game, index) * rentMultiplier;
   if (rent > 0) {
     say(game, `Seat ${seat + 1} paid $${rent} rent on ${tile.name}.`);
     charge(game, seat, rent, owner);
@@ -436,6 +460,7 @@ function nextTurn(game) {
 
     if (p.jailTurns >= JAIL_TURNS) {
       p.jailTurns = -1;
+      if (game.jailBribes && game.jailBribes.seat === next) game.jailBribes = null;
       say(game, `Seat ${next + 1} served their time and walked out of Jail.`);
       break; // out, and they play this turn
     }
@@ -466,30 +491,42 @@ function bankrupt(game, seat, creditor) {
   p.bankrupt = true;
   p.cash = 0;
 
+  const hasCreditor = creditor !== null && creditor !== undefined && !game.players[creditor].bankrupt;
+  const freedProperties = [];
+
   for (const [idxStr, st] of Object.entries(game.tiles)) {
     if (st.owner !== seat) continue;
     const index = Number(idxStr);
-    if (creditor !== null && creditor !== undefined && !game.players[creditor].bankrupt) {
-      st.owner = creditor;
-      // Houses are sold back to the bank at half price, paid to the
-      // creditor — the classic rule, and it stops a hotel row transferring
-      // wholesale on a single bad landing.
-      if (st.houses > 0) {
-        const buildCosts = BOARD[index].build;
-        for (let lvl = 0; lvl < st.houses; lvl++) {
-          game.players[creditor].cash += Math.floor((buildCosts[lvl] || 0) / 2);
-        }
-        st.houses = 0;
-      }
-    } else {
-      st.owner = null;
+    // Houses are always sold back to the bank at half price — whether the
+    // bare lot ends up with a creditor or back on the open market, a
+    // bankrupt player's upgrades never survive them.
+    if (st.houses > 0) {
+      const buildCosts = BOARD[index].build;
+      let refund = 0;
+      for (let lvl = 0; lvl < st.houses; lvl++) refund += Math.floor((buildCosts[lvl] || 0) / 2);
+      if (hasCreditor) game.players[creditor].cash += refund;
       st.houses = 0;
-      st.mortgaged = false;
     }
+    // Everything goes back to the bank (unowned) rather than handing the
+    // whole estate to whoever bankrupted them — the creditor only gets to
+    // pick ONE property for themselves (see mono:bankrupt_pick below);
+    // the rest sit unowned until someone lands on them, same as any other
+    // open tile.
+    st.owner = null;
+    st.mortgaged = false;
+    if (hasCreditor) freedProperties.push(index);
   }
+
   say(game, `Seat ${seat + 1} went bankrupt.`);
-  game.pending = null;
-  game.phase = "action";
+
+  if (hasCreditor && freedProperties.length > 0) {
+    game.phase = "bankrupt_pick";
+    game.pending = { type: "bankrupt_pick", seat, creditor, properties: freedProperties };
+    say(game, `Seat ${creditor + 1} gets to take one property from Seat ${seat + 1}'s estate.`);
+  } else {
+    game.pending = null;
+    game.phase = "action";
+  }
 }
 
 // --- Build / mortgage rules ------------------------------------------
@@ -526,6 +563,33 @@ function canMortgage(game, seat, index) {
   return true;
 }
 
+// Cash + face value of everything a seat owns — the same estimate the
+// client already shows under each player's cash in the corner card.
+function netWorth(game, seat) {
+  let total = game.players[seat].cash;
+  for (const [idxStr, st] of Object.entries(game.tiles)) {
+    if (st.owner !== seat) continue;
+    total += BOARD[Number(idxStr)]?.price || 0;
+  }
+  return total;
+}
+
+// Checked after every broadcast state — the house rule is "first to
+// $7500 net worth wins outright", so this has to catch it the moment any
+// action (rent, a purchase, a card, a trade, a bribe...) pushes someone
+// over the line, not just at the end of a turn.
+function checkNetWorthWin(game) {
+  if (game.phase === "over") return;
+  for (const seat of activeSeats(game)) {
+    if (netWorth(game, seat) >= WIN_NET_WORTH) {
+      game.phase = "over";
+      game.winner = seat;
+      say(game, `Seat ${seat + 1} reached $${WIN_NET_WORTH} net worth and wins the game!`);
+      return;
+    }
+  }
+}
+
 function attachMonopoly(io, socket, ctx) {
   const { rooms, codes, roomChannel } = ctx;
 
@@ -556,6 +620,7 @@ function attachMonopoly(io, socket, ctx) {
   function pushState(roomId, { withBoard = false, to = null } = {}) {
     const room = rooms.get(roomId);
     if (!room || !room.game) return;
+    checkNetWorthWin(room.game);
     const payload = {
       roomId,
       game: room.game,
@@ -662,22 +727,21 @@ function attachMonopoly(io, socket, ctx) {
 
   socket.on("mono:roll", ({ roomId }) => {
     // Normally only valid at the start of your turn ("roll" phase). The
-    // one exception: you rolled doubles and earned another roll, which
-    // leaves you in "action" phase with game.doubles > 0 — let that one
-    // extra case through so the doubles roll happens in a single click
-    // instead of an "acknowledge, then roll" round trip.
+    // one exception: you rolled a 6 and earned another roll, which leaves
+    // you in "action" phase with game.doubles > 0 — let that one extra
+    // case through so the bonus roll happens in a single click instead of
+    // an "acknowledge, then roll" round trip. (Still called `doubles`
+    // internally — it's just a streak of 6s now that there's one die.)
     const found = actor(roomId, ["roll", "action"]);
     if (!found) return;
     const { room, seat, game } = found;
     if (game.phase === "action" && game.doubles <= 0) return;
     const p = game.players[seat];
 
-    const d1 = crypto.randomInt(1, 7);
-    const d2 = crypto.randomInt(1, 7);
-    game.dice = [d1, d2];
+    const d = crypto.randomInt(1, 7);
+    game.dice = d;
     game.card = null;
-    const isDouble = d1 === d2;
-    const total = d1 + d2;
+    const isSix = d === 6;
 
     // In Jail means no turn at all — nextTurn serves the time and skips
     // straight past them, so a roll should never arrive from someone in
@@ -685,10 +749,10 @@ function attachMonopoly(io, socket, ctx) {
     // authority on this.
     if (p.jailTurns >= 0) return;
 
-    if (isDouble) {
+    if (isSix) {
       game.doubles += 1;
       if (game.doubles >= 3) {
-        say(game, `Seat ${seat + 1} rolled three doubles in a row — off to Jail.`);
+        say(game, `Seat ${seat + 1} rolled three 6s in a row — off to Jail.`);
         goToJail(game, seat);
         game.phase = "action";
         endJailedTurn(game, seat);
@@ -699,9 +763,9 @@ function attachMonopoly(io, socket, ctx) {
       game.doubles = 0;
     }
 
-    say(game, `Seat ${seat + 1} rolled ${d1} + ${d2}.`);
-    moveTo(game, seat, (p.pos + total) % BOARD_SIZE);
-    resolveLanding(game, seat, total);
+    say(game, `Seat ${seat + 1} rolled a ${d}.`);
+    moveTo(game, seat, (p.pos + d) % BOARD_SIZE);
+    resolveLanding(game, seat);
     settleAfterAction(game);
     endJailedTurn(game, seat);
     pushState(roomId);
@@ -762,7 +826,7 @@ function attachMonopoly(io, socket, ctx) {
     const tile = BOARD[index];
     const st = tileState(game, index);
     st.houses -= 1;
-    game.players[seat].cash += Math.floor(tile.build[st.houses] / 2);
+    game.players[seat].cash += Math.floor(tile.build[st.houses] * DOWNGRADE_REFUND_RATE);
     say(game, `Seat ${seat + 1} downgraded ${tile.name} to level ${st.houses} — rent is now $${tile.rent[st.houses]}.`);
     pushState(roomId);
   });
@@ -822,6 +886,35 @@ function attachMonopoly(io, socket, ctx) {
     const { game, seat } = found;
     const creditor = game.pending?.creditor ?? null;
     bankrupt(game, seat, creditor);
+    // If there's a creditor to pick a property, the turn doesn't advance
+    // until they've done that — see mono:bankrupt_pick.
+    if (game.phase !== "bankrupt_pick") nextTurn(game);
+    pushState(roomId);
+  });
+
+  // The creditor who bankrupted someone picks ONE property to keep from
+  // the estate — everything else already went back to the bank in
+  // bankrupt(). Pass index: null to take nothing. Not gated on whose turn
+  // it is (same as a trade response) — the table waits on this pick
+  // before play continues.
+  socket.on("mono:bankrupt_pick", ({ roomId, index }) => {
+    const room = myRoom(roomId);
+    if (!room || room.status !== "playing") return;
+    const game = room.game;
+    if (game.phase !== "bankrupt_pick") return;
+    const pending = game.pending;
+    const seat = seatOf(room, socket.userId);
+    if (seat === -1 || seat !== pending.creditor) return;
+
+    if (index !== null && index !== undefined) {
+      if (!pending.properties.includes(index)) return;
+      tileState(game, index).owner = pending.creditor;
+      say(game, `Seat ${pending.creditor + 1} took ${BOARD[index].name} from Seat ${pending.seat + 1}'s estate.`);
+    } else {
+      say(game, `Seat ${pending.creditor + 1} didn't take any property from Seat ${pending.seat + 1}'s estate.`);
+    }
+    game.pending = null;
+    game.phase = "action";
     nextTurn(game);
     pushState(roomId);
   });
@@ -831,12 +924,12 @@ function attachMonopoly(io, socket, ctx) {
     if (!found) return;
     const { game, seat } = found;
     const p = game.players[seat];
-    // Rolling doubles buys another roll — unless it put you in Jail.
+    // Rolling a 6 buys another roll — unless it put you in Jail.
     if (game.doubles > 0 && p.jailTurns < 0) {
       game.phase = "roll";
       game.card = null;
       game.pending = null;
-      say(game, `Seat ${seat + 1} rolled doubles — rolling again.`);
+      say(game, `Seat ${seat + 1} rolled a 6 — rolling again.`);
     } else {
       nextTurn(game);
     }
@@ -857,8 +950,52 @@ function attachMonopoly(io, socket, ctx) {
     p.getOut -= 1;
     p.jailTurns = -1;
     say(game, `Seat ${seat + 1} used a Get Out of Jail Free card.`);
-    // Their release settles any vote that was running on them.
+    // Their release settles any vote (or bribe window) that was running
+    // on them.
     if (game.jailVote && game.jailVote.seat === seat) game.jailVote = null;
+    if (game.jailBribes && game.jailBribes.seat === seat) game.jailBribes = null;
+    pushState(roomId);
+  });
+
+  // After a jail vote resolves, every voter's choice is visible and still
+  // up for grabs — anyone still in the game (the jailed player included)
+  // can pay a flat fee straight to a voter to flip their recorded vote
+  // either way ("keep" -> "free" to help someone out, or "free" -> "keep"
+  // to work against them). Recalculated after every bribe: if that tips
+  // the majority to "free", the jailed player walks immediately.
+  socket.on("mono:jail_bribe", ({ roomId, targetSeat, direction }) => {
+    const room = myRoom(roomId);
+    if (!room || room.status !== "playing") return;
+    const game = room.game;
+    const jb = game.jailBribes;
+    if (!jb) return;
+    if (direction !== "free" && direction !== "keep") return;
+    const seat = seatOf(room, socket.userId);
+    if (seat === -1 || seat === targetSeat) return; // no bribing yourself
+    const payer = game.players[seat];
+    if (!payer || payer.bankrupt) return;
+    if (jb.votes[targetSeat] === undefined || jb.votes[targetSeat] === direction) return;
+    const target = game.players[targetSeat];
+    if (!target || target.bankrupt) return;
+    if (payer.cash < JAIL_BRIBE_AMOUNT) return;
+
+    payer.cash -= JAIL_BRIBE_AMOUNT;
+    target.cash += JAIL_BRIBE_AMOUNT;
+    jb.votes[targetSeat] = direction;
+    say(
+      game,
+      `Seat ${seat + 1} paid Seat ${targetSeat + 1} $${JAIL_BRIBE_AMOUNT} to flip their jail vote to ${direction}.`,
+    );
+
+    const choices = Object.values(jb.votes);
+    const freeCount = choices.filter((c) => c === "free").length;
+    const keepCount = choices.filter((c) => c === "keep").length;
+    const jailed = game.players[jb.seat];
+    if (jailed && jailed.jailTurns >= 0 && freeCount > keepCount) {
+      jailed.jailTurns = -1;
+      say(game, `Seat ${jb.seat + 1} bribed their way out of Azkaban.`);
+      game.jailBribes = null;
+    }
     pushState(roomId);
   });
 

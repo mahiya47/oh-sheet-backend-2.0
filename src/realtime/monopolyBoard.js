@@ -27,6 +27,14 @@
 // go from level 0->1, 1->2, and 2->3, rising each time. "Houses" is
 // still the internal field name for upgrade level (0-3) — the UI shows
 // it as a rent upgrade, not a house.
+//
+// Utilities (the 4 Hogwarts Houses) used to charge a dice-total-based
+// rent — with the game now down to a single die that math no longer
+// made sense, so they charge a FIXED rent instead, same shape as a
+// street's rent[] table but indexed by how many of the 4 you own (1..4)
+// rather than by upgrade level.
+const UTILITY_RENT = [25, 60, 120, 200];
+
 const BOARD = [
   { i: 0, type: "go", name: "Platform 9¾" },
 
@@ -58,7 +66,7 @@ const BOARD = [
     rent: [12, 30, 270, 550],
     build: [50, 100, 150],
   },
-  { i: 5, type: "utility", name: "Gryffindor Tower", price: 150 },
+  { i: 5, type: "utility", name: "Gryffindor Tower", price: 150, rent: UTILITY_RENT },
   {
     i: 6,
     type: "street",
@@ -107,7 +115,7 @@ const BOARD = [
     rent: [28, 70, 550, 950],
     build: [100, 200, 300],
   },
-  { i: 12, type: "utility", name: "Hufflepuff Basement", price: 150 },
+  { i: 12, type: "utility", name: "Hufflepuff Basement", price: 150, rent: UTILITY_RENT },
   {
     i: 13,
     type: "street",
@@ -157,7 +165,7 @@ const BOARD = [
     rent: [44, 110, 800, 1150],
     build: [150, 300, 450],
   },
-  { i: 20, type: "utility", name: "Ravenclaw Tower", price: 150 },
+  { i: 20, type: "utility", name: "Ravenclaw Tower", price: 150, rent: UTILITY_RENT },
   {
     i: 21,
     type: "street",
@@ -206,7 +214,7 @@ const BOARD = [
     rent: [70, 175, 1100, 1500],
     build: [200, 400, 600],
   },
-  { i: 27, type: "utility", name: "Slytherin Dungeon", price: 150 },
+  { i: 27, type: "utility", name: "Slytherin Dungeon", price: 150, rent: UTILITY_RENT },
   {
     i: 28,
     type: "street",

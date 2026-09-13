@@ -126,6 +126,28 @@ function isValidHttpUrl(value) {
   }
 }
 
+// avatarUrl and coverUrl only, NOT the social link fields above: the
+// frontend's preset avatar/cover picker (see presetAssets.js) generates
+// these as inline `data:image/svg+xml` URIs rather than real uploads, so
+// they need a second door in besides a real http(s) upload. This is safe
+// specifically because avatarUrl/coverUrl are only ever rendered through
+// <img src> or a CSS background-image (ProfilePage.jsx and every avatar
+// spot in the app) — both sinks where a browser will never execute a
+// script embedded in an SVG, unlike the <a href> the comment above is
+// protecting. Capped well above anything a generated preset needs, so a
+// stray API call can't stuff an arbitrarily large blob into the column.
+const DATA_IMAGE_URI_RE = /^data:image\/(png|jpe?g|gif|webp|svg\+xml);[a-z0-9-]+,/i;
+const MAX_DATA_IMAGE_URI_LENGTH = 200000;
+
+function isValidImageSrc(value) {
+  if (isValidHttpUrl(value)) return true;
+  return (
+    typeof value === "string" &&
+    value.length <= MAX_DATA_IMAGE_URI_LENGTH &&
+    DATA_IMAGE_URI_RE.test(value)
+  );
+}
+
 async function updateProfile(req, res) {
   try {
     const {
@@ -162,16 +184,14 @@ async function updateProfile(req, res) {
       return res.status(400).json({ message: "Invalid orientation value" });
     }
 
-    const urlFields = {
-      avatarUrl,
-      coverUrl,
-      githubUrl,
-      twitterUrl,
-      linkedinUrl,
-      instagramUrl,
-      pinterestUrl,
-    };
-    for (const [field, value] of Object.entries(urlFields)) {
+    const imageUrlFields = { avatarUrl, coverUrl };
+    for (const [field, value] of Object.entries(imageUrlFields)) {
+      if (value !== undefined && value !== null && value !== "" && !isValidImageSrc(value)) {
+        return res.status(400).json({ message: `${field} must be a valid http(s) URL or preset image` });
+      }
+    }
+    const linkUrlFields = { githubUrl, twitterUrl, linkedinUrl, instagramUrl, pinterestUrl };
+    for (const [field, value] of Object.entries(linkUrlFields)) {
       if (value !== undefined && value !== null && value !== "" && !isValidHttpUrl(value)) {
         return res.status(400).json({ message: `${field} must be a valid http(s) URL` });
       }
