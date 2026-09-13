@@ -388,7 +388,7 @@ function resolveLanding(game, seat, depth = 0, rentMultiplier = 1) {
     if (mine.length > 0 && someoneElseHasOne) {
       game.phase = "trade_offer";
       game.pending = { type: "trade_offer" };
-      say(game, `Seat ${seat + 1} landed on Diagon Alley — choosing a property to trade.`);
+      say(game, `Seat ${seat + 1} landed on Diagon Alley — choosing a person to trade.`);
     }
     return;
   }
@@ -406,12 +406,12 @@ function resolveLanding(game, seat, depth = 0, rentMultiplier = 1) {
   if (game.players[owner].bankrupt) return;
   const st = game.tiles[index];
   if (st.mortgaged) {
-    say(game, `${tile.name} is mortgaged — no rent due.`);
+    say(game, `${tile.name} is released — no salary due.`);
     return;
   }
   const rent = rentFor(game, index) * rentMultiplier;
   if (rent > 0) {
-    say(game, `Seat ${seat + 1} paid $${rent} rent on ${tile.name}.`);
+    say(game, `Seat ${seat + 1} paid $${rent} salary for ${tile.name}.`);
     charge(game, seat, rent, owner);
   }
 }
@@ -522,7 +522,7 @@ function bankrupt(game, seat, creditor) {
   if (hasCreditor && freedProperties.length > 0) {
     game.phase = "bankrupt_pick";
     game.pending = { type: "bankrupt_pick", seat, creditor, properties: freedProperties };
-    say(game, `Seat ${creditor + 1} gets to take one property from Seat ${seat + 1}'s estate.`);
+    say(game, `Seat ${creditor + 1} gets to take one person from Seat ${seat + 1}'s roster.`);
   } else {
     game.pending = null;
     game.phase = "action";
@@ -783,7 +783,7 @@ function attachMonopoly(io, socket, ctx) {
 
     game.players[seat].cash -= tile.price;
     tileState(game, index).owner = seat;
-    say(game, `Seat ${seat + 1} bought ${tile.name} for $${tile.price}.`);
+    say(game, `Seat ${seat + 1} recruited ${tile.name} for $${tile.price}.`);
     game.pending = null;
     game.phase = "action";
     pushState(roomId);
@@ -794,7 +794,7 @@ function attachMonopoly(io, socket, ctx) {
     if (!found) return;
     const { game } = found;
     const index = game.pending?.index;
-    if (index !== undefined) say(game, `${BOARD[index].name} was left on the market.`);
+    if (index !== undefined) say(game, `${BOARD[index].name} stays a free agent.`);
     game.pending = null;
     game.phase = "action";
     pushState(roomId);
@@ -827,7 +827,7 @@ function attachMonopoly(io, socket, ctx) {
     const st = tileState(game, index);
     st.houses -= 1;
     game.players[seat].cash += Math.floor(tile.build[st.houses] * DOWNGRADE_REFUND_RATE);
-    say(game, `Seat ${seat + 1} downgraded ${tile.name} to level ${st.houses} — rent is now $${tile.rent[st.houses]}.`);
+    say(game, `Seat ${seat + 1} downgraded ${tile.name} to level ${st.houses} — salary is now $${tile.rent[st.houses]}.`);
     pushState(roomId);
   });
 
@@ -839,7 +839,7 @@ function attachMonopoly(io, socket, ctx) {
     const tile = BOARD[index];
     tileState(game, index).mortgaged = true;
     game.players[seat].cash += Math.floor(tile.price / 2);
-    say(game, `Seat ${seat + 1} mortgaged ${tile.name}.`);
+    say(game, `Seat ${seat + 1} released ${tile.name}.`);
     pushState(roomId);
   });
 
@@ -853,7 +853,7 @@ function attachMonopoly(io, socket, ctx) {
     if (game.players[seat].cash < cost) return;
     game.players[seat].cash -= cost;
     st.mortgaged = false;
-    say(game, `Seat ${seat + 1} lifted the mortgage on ${BOARD[index].name}.`);
+    say(game, `Seat ${seat + 1} re-recruited ${BOARD[index].name}.`);
     pushState(roomId);
   });
 
@@ -909,9 +909,9 @@ function attachMonopoly(io, socket, ctx) {
     if (index !== null && index !== undefined) {
       if (!pending.properties.includes(index)) return;
       tileState(game, index).owner = pending.creditor;
-      say(game, `Seat ${pending.creditor + 1} took ${BOARD[index].name} from Seat ${pending.seat + 1}'s estate.`);
+      say(game, `Seat ${pending.creditor + 1} took ${BOARD[index].name} from Seat ${pending.seat + 1}'s roster.`);
     } else {
-      say(game, `Seat ${pending.creditor + 1} didn't take any property from Seat ${pending.seat + 1}'s estate.`);
+      say(game, `Seat ${pending.creditor + 1} didn't recruit anyone from Seat ${pending.seat + 1}'s roster.`);
     }
     game.pending = null;
     game.phase = "action";

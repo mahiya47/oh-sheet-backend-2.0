@@ -8,6 +8,8 @@ const { checkContent } = require("../lib/moderation");
 const { resolveMentionedUsers } = require("../lib/mentions");
 const { generateOgImageBuffer } = require("../lib/ogImage");
 const { sanitizeContentHtml } = require("../lib/richText");
+const { normalizeTemplate } = require("../lib/postTemplates");
+const { extractFirstUrl, fetchLinkPreview } = require("../lib/linkPreview");
 const { mediaUrl } = require("./media.controller");
 const { getBlockedUserIds } = require("../lib/blocks");
 const { getHiddenPrivateAuthorIds, isPrivateAndHidden } = require("../lib/privacy");
@@ -35,6 +37,17 @@ async function generateAndAttachOgImage(post, req) {
   } catch (error) {
     console.error("OG image generation failed:", error.message);
   }
+}
+
+// Shared by createPost/updatePost — finds the first link in a post's
+// plain-text content and, if there is one, scrapes it for an Open Graph
+// preview card (see lib/linkPreview.js). Best-effort: no link, or a
+// failed/timed-out scrape, both just mean no preview — never blocks
+// posting or editing.
+async function resolveLinkPreview(content) {
+  const url = extractFirstUrl(content);
+  if (!url) return null;
+  return fetchLinkPreview(url);
 }
 
 // Shared by createPost/updatePost — notifies anyone @mentioned in the
@@ -182,8 +195,12 @@ async function createPost(req, res) {
     const images = normalizeImageUrls(req.body.images);
     const tagNames = normalizeTags(req.body.tags);
     const taggedUserIds = normalizeTaggedUserIds(req.body.taggedUserIds, req.userId);
+    const { templateType, templateData } = normalizeTemplate(
+      req.body.templateType,
+      req.body.templateData,
+    );
 
-    if (!content?.trim() && !imageUrl && !videoUrl && !images?.length) {
+    if (!content?.trim() && !imageUrl && !videoUrl && !images?.length && !templateData) {
       return res.status(400).json({ message: "Add some text, an image, or a video" });
     }
 
@@ -213,6 +230,8 @@ async function createPost(req, res) {
       "-" +
       Date.now();
 
+    const linkPreview = await resolveLinkPreview(content);
+
     const post = await prisma.post.create({
       data: {
         title: titleSource.slice(0, 120),
@@ -226,6 +245,9 @@ async function createPost(req, res) {
         published: true,
         authorId: req.userId,
         slug,
+        templateType,
+        templateData: templateData || undefined,
+        linkPreview: linkPreview || undefined,
         ...(images?.length && {
           images: { create: images.map((url, position) => ({ url, position })) },
         }),
@@ -407,6 +429,15 @@ async function updatePost(req, res) {
       return res.status(403).json({ message: "You can only edit your own posts" });
     }
 
+    // templateType/templateData are only touched when the client actually
+    // sent one of them — omitting both from an edit (e.g. a plain caption
+    // tweak from FeedCard's inline editor, which knows nothing about
+    // templates) leaves whatever template the post already had alone.
+    const touchesTemplate = req.body.templateType !== undefined || req.body.templateData !== undefined;
+    const { templateType, templateData } = touchesTemplate
+      ? normalizeTemplate(req.body.templateType, req.body.templateData)
+      : { templateType: undefined, templateData: undefined };
+
     const moderationError = checkContent(content);
     if (moderationError) {
       return res.status(400).json({ message: moderationError });
@@ -426,11 +457,19 @@ async function updatePost(req, res) {
           ? null
           : undefined;
 
+    const nextLinkPreview =
+      content !== undefined && content !== existing.content
+        ? await resolveLinkPreview(content)
+        : undefined;
+
     const updated = await prisma.post.update({
       where: { id },
       data: {
         content,
         contentHtml: nextContentHtml,
+        templateType,
+        templateData,
+        linkPreview: nextLinkPreview,
         // undefined = leave unchanged; null = explicitly clear (attachment removed).
         // `images` sent (even []) overrides imageUrl with its first entry —
         // see normalizeImageUrls above.

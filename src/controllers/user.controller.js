@@ -2,6 +2,7 @@ const prisma = require("../lib/prisma");
 const { publicUserSelect, postIncludeForFormat, formatPost } = require("../utils/format");
 const { getViewerContext } = require("./post.controller");
 const { sendServerError } = require("../lib/errorLog");
+const { levelForScore } = require("../lib/xp");
 
 // GET /api/users/:username — a profile page, looked up by username (the new
 // frontend routes as /profile/:username).
@@ -15,6 +16,7 @@ async function getUserByUsername(req, res) {
         ...publicUserSelect,
         createdAt: true,
         deletedAt: true,
+        score: true,
         pronouns: true,
         currentCity: true,
         work: true,
@@ -71,6 +73,7 @@ async function getUserByUsername(req, res) {
       followersCount: user._count.followers,
       followingCount: user._count.following,
       _count: undefined,
+      level: levelForScore(user.score),
       isFollowedByMe,
       hasPendingRequest,
       isOwnProfile: isSelf,
@@ -493,7 +496,10 @@ async function getLeaderboard(req, res) {
       // leaderboard is the one place that needs it.
       select: { ...publicUserSelect, score: true },
     });
-    const users = candidates.filter((u) => !isLeaderboardExempt(u)).slice(0, 20);
+    const users = candidates
+      .filter((u) => !isLeaderboardExempt(u))
+      .slice(0, 20)
+      .map((u) => ({ ...u, level: levelForScore(u.score) }));
     return res.json(users);
   } catch (error) {
     return sendServerError(res, error, req);

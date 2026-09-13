@@ -235,6 +235,25 @@ model Post {
   // formatPost's normal output — only post.controller.js's getPostAnalytics
   // queries this, and only for the post's own author.
   views       PostView[]
+  // New in 2.0 — post templates. `templateType` names which structured
+  // template the post was composed with ("recipe" | "travel"; null for a
+  // normal freeform post — the overwhelming majority). `templateData` is
+  // that template's own fields as JSON (see lib/postTemplates.js for the
+  // exact shape per type) — `content`/`contentHtml` stay the plain
+  // caption/description either way, so search, @mentions, the OG image
+  // generator, and every existing consumer keep working unchanged; only
+  // FeedCard.jsx/PostPage.jsx render templateData specially, as an extra
+  // card above the caption. Needs a real migration before 2.0 can use it
+  // against the live Oracle VM database.
+  templateType String?
+  templateData Json?
+  // New in 2.0 — a rich preview card for the first link in a post's
+  // content (title/description/image/site name scraped from the target
+  // page's Open Graph tags at post-creation/edit time — see
+  // lib/linkPreview.js). Null when the post has no link, or the scrape
+  // failed/timed out (best-effort — never blocks posting). Needs a real
+  // migration before 2.0 can use it against the live Oracle VM database.
+  linkPreview Json?
 }
 
 // New in 2.0 — one row per recorded view of a post, so analytics can chart
