@@ -90,13 +90,8 @@ function formatPost(post, viewerId, followedAuthorIds = new Set(), bookmarkedPos
       ? (post.taggedUsers || []).some((tu) => tu.userId === viewerId)
       : false,
     isMutedByMe: viewerId ? mutedAuthorIds.has(post.authorId) : false,
-    // Post templates (see lib/postTemplates.js) — null/null for a normal
-    // freeform post, the overwhelming majority. FeedCard.jsx/PostPage.jsx
-    // render templateData as an extra card above the caption when set.
     templateType: post.templateType || null,
     templateData: post.templateData || null,
-    // Rich link-embed preview (see lib/linkPreview.js) — null when the
-    // post has no link, or the scrape failed/timed out.
     linkPreview: post.linkPreview || null,
   };
 }

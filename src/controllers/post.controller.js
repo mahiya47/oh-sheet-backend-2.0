@@ -39,11 +39,7 @@ async function generateAndAttachOgImage(post, req) {
   }
 }
 
-// Shared by createPost/updatePost — finds the first link in a post's
-// plain-text content and, if there is one, scrapes it for an Open Graph
-// preview card (see lib/linkPreview.js). Best-effort: no link, or a
-// failed/timed-out scrape, both just mean no preview — never blocks
-// posting or editing.
+// Best-effort link preview for the first url in the content, if any.
 async function resolveLinkPreview(content) {
   const url = extractFirstUrl(content);
   if (!url) return null;
@@ -429,10 +425,7 @@ async function updatePost(req, res) {
       return res.status(403).json({ message: "You can only edit your own posts" });
     }
 
-    // templateType/templateData are only touched when the client actually
-    // sent one of them — omitting both from an edit (e.g. a plain caption
-    // tweak from FeedCard's inline editor, which knows nothing about
-    // templates) leaves whatever template the post already had alone.
+    // Leave the existing template alone unless the client actually sends one.
     const touchesTemplate = req.body.templateType !== undefined || req.body.templateData !== undefined;
     const { templateType, templateData } = touchesTemplate
       ? normalizeTemplate(req.body.templateType, req.body.templateData)

@@ -16,7 +16,7 @@ async function getUserByUsername(req, res) {
         ...publicUserSelect,
         createdAt: true,
         deletedAt: true,
-        score: true,
+        score: true, // for level badge
         pronouns: true,
         currentCity: true,
         work: true,
